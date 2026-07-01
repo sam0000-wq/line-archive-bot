@@ -7,10 +7,10 @@ import sys
 from datetime import datetime
 import pytz
 from apscheduler.schedulers.background import BackgroundScheduler
-from flask import Flask, jsonify, request, abort
+from flask import Flask, jsonify, request, abort, send_file
 from linebot.v3 import SignatureValidator
 from linebot.v3.webhook import WebhookHandler
-from linebot.v3.messaging import MessagingApi, ApiClient, Configuration
+from linebot.v3.messaging import MessagingApi, ApiClient, Configuration, TextMessage, PushMessageRequest
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.webhooks import MessageEvent, TextMessageContent, JoinEvent
 from archiver import archive_message
@@ -35,6 +35,26 @@ detected_group_ids: list[str] = []
 last_messages: list[dict] = []
 
 
+def send_line_report(today: str) -> None:
+    if not Config.TARGET_GROUP_ID:
+        logger.warning("TARGET_GROUP_ID not set, skipping LINE group notification")
+        return
+    url = f"{Config.BASE_URL}/files/line_archive_{today}.xlsx"
+    msg = f"📋 {today} 群組訊息歸檔報告已產生\n下載: {url}"
+    try:
+        with ApiClient(configuration) as api_client:
+            messaging_api = MessagingApi(api_client)
+            messaging_api.push_message(
+                PushMessageRequest(
+                    to=Config.TARGET_GROUP_ID,
+                    messages=[TextMessage(text=msg)],
+                )
+            )
+        logger.info("LINE group notification sent for %s", today)
+    except Exception:
+        logger.exception("Failed to send LINE group notification for %s", today)
+
+
 def scheduled_report_job() -> None:
     today = datetime.now(TAIPEI_TZ).strftime("%Y%m%d")
     logger.info("Scheduled report triggered for %s", today)
@@ -43,6 +63,16 @@ def scheduled_report_job() -> None:
         logger.info("Scheduled report sent OK for %s", today)
     else:
         logger.error("Scheduled report FAILED for %s", today)
+    send_line_report(today)
+
+
+@app.route("/files/<path:filename>", methods=["GET"])
+def serve_file(filename: str):
+    from pathlib import Path as _Path
+    filepath = Config.ARCHIVE_DIR / _Path(filename).name
+    if not filepath.exists() or not filepath.is_file():
+        abort(404, "File not found")
+    return send_file(str(filepath), as_attachment=True)
 
 
 @app.route("/health", methods=["GET"])

@@ -24,6 +24,7 @@ class Config:
     REPORT_TO_EMAIL: str = _get_env("REPORT_TO_EMAIL", "itsamliu2025@gmail.com")
     TZ: str = _get_env("TZ", "Asia/Taipei")
     APP_PORT: int = int(_get_env("PORT", "5000"))
+    BASE_URL: str = _get_env("BASE_URL", "https://line-archive-bot.onrender.com")
     BASE_DIR: Path = Path(__file__).resolve().parent
     ARCHIVE_DIR: Path = BASE_DIR / "archive"
     LOG_DIR: Path = BASE_DIR / "logs"
