@@ -25,7 +25,10 @@ def _daily_path(date: Optional[datetime] = None) -> Path:
 
 
 def _get_sheet_name(text: str) -> str:
-    word = text.lower().strip().split()[0] if text.strip() else ""
+    word = text.strip()
+    if not word:
+        return SHEET_OTHERS
+    word = word.lower().split()[0].strip(",:;，：；")
     if word == "critical":
         return SHEET_CRITICAL
     if word == "warning":
