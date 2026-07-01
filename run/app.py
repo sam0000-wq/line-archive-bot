@@ -12,7 +12,7 @@ from linebot.v3 import SignatureValidator
 from linebot.v3.webhook import WebhookHandler
 from linebot.v3.messaging import MessagingApi, ApiClient, Configuration
 from linebot.v3.exceptions import InvalidSignatureError
-from linebot.v3.webhooks import MessageEvent, TextMessageContent, JoinEvent, JoinSource
+from linebot.v3.webhooks import MessageEvent, TextMessageContent, JoinEvent
 from archiver import archive_message
 from config import Config
 from mailer import send_report
