@@ -25,7 +25,7 @@ def _daily_path(date: Optional[datetime] = None) -> Path:
 
 
 def _get_sheet_name(text: str) -> str:
-    cleaned = text.lower().strip()
+    cleaned = text.lower().strip().replace("：", ":")
     if cleaned.startswith("critical:"):
         return SHEET_CRITICAL
     if cleaned.startswith("warning:"):
