@@ -26,10 +26,14 @@ def _daily_path(date: Optional[datetime] = None) -> Path:
 
 def _get_sheet_name(text: str) -> str:
     cleaned = text.lower().strip()
-    if cleaned.startswith("critical:"):
-        return SHEET_CRITICAL
-    if cleaned.startswith("warning:"):
-        return SHEET_WARNING
+    critical_keywords = ["緊急", "重要", "急"]
+    warning_keywords = ["注意", "提醒"]
+    for kw in critical_keywords:
+        if kw in cleaned:
+            return SHEET_CRITICAL
+    for kw in warning_keywords:
+        if kw in cleaned:
+            return SHEET_WARNING
     return SHEET_OTHERS
 
 
