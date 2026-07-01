@@ -1,0 +1,22 @@
+﻿services:
+  - type: web
+    name: line-archive-bot
+    env: python
+    buildCommand: pip install -r run/requirements.txt
+    startCommand: gunicorn run.app:app
+    healthCheckPath: /health
+    envVars:
+      - key: LINE_CHANNEL_SECRET
+        sync: false
+      - key: LINE_CHANNEL_ACCESS_TOKEN
+        sync: false
+      - key: TARGET_GROUP_ID
+        sync: false
+      - key: GMAIL_USER
+        value: itsamliu2025@gmail.com
+      - key: GMAIL_APP_PASSWORD
+        sync: false
+      - key: REPORT_TO_EMAIL
+        value: itsamliu2025@gmail.com
+      - key: TZ
+        value: Asia/Taipei
