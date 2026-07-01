@@ -2,9 +2,10 @@
   - type: web
     name: line-archive-bot
     env: python
-    buildCommand: pip install -r run/requirements.txt
-    startCommand: gunicorn run.app:app
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
     healthCheckPath: /health
+    rootDir: run
     envVars:
       - key: LINE_CHANNEL_SECRET
         sync: false
