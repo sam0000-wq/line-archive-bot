@@ -12,7 +12,7 @@ from linebot.v3 import SignatureValidator
 from linebot.v3.webhook import WebhookHandler
 from linebot.v3.messaging import MessagingApi, ApiClient, Configuration
 from linebot.v3.exceptions import InvalidSignatureError
-from linebot.v3.webhooks import MessageEvent, TextMessageContent
+from linebot.v3.webhooks import MessageEvent, TextMessageContent, JoinEvent, JoinSource
 from archiver import archive_message
 from config import Config
 from mailer import send_report
@@ -30,6 +30,9 @@ configuration = Configuration(access_token=Config.LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(Config.LINE_CHANNEL_SECRET)
 scheduler = BackgroundScheduler()
 TAIPEI_TZ = pytz.timezone("Asia/Taipei")
+
+detected_group_ids: list[str] = []
+last_messages: list[dict] = []
 
 
 def scheduled_report_job() -> None:
@@ -60,6 +63,13 @@ def callback():
     return jsonify({"status": "ok"})
 
 
+@app.route("/group-id", methods=["GET"])
+def get_group_id():
+    return jsonify({
+        "detected_group_ids": list(dict.fromkeys(detected_group_ids)),
+        "last_messages": last_messages[-10:],
+    })
+
 @app.route("/send-report", methods=["POST"])
 def trigger_report():
     today = datetime.now(TAIPEI_TZ).strftime("%Y%m%d")
@@ -69,6 +79,15 @@ def trigger_report():
     return jsonify({"status": "error", "date": today}), 500
 
 
+@handler.add(JoinEvent)
+def handle_join(event: JoinEvent) -> None:
+    source = event.source
+    group_id = getattr(source, "group_id", None)
+    if group_id:
+        logger.info("[GROUP ID DETECTED] groupId=%s (via join event)", group_id)
+        if group_id not in detected_group_ids:
+            detected_group_ids.append(group_id)
+
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_text_message(event: MessageEvent) -> None:
     message: TextMessageContent = event.message
@@ -76,6 +95,14 @@ def handle_text_message(event: MessageEvent) -> None:
     group_id = getattr(source, "group_id", None)
     if group_id:
         logger.info("[GROUP ID DETECTED] groupId=%s", group_id)
+        if group_id not in detected_group_ids:
+            detected_group_ids.append(group_id)
+        last_messages.append({
+            "group_id": group_id,
+            "user_id": source.user_id,
+            "text": message.text[:100],
+            "timestamp": datetime.fromtimestamp(event.timestamp / 1000.0, tz=TAIPEI_TZ).isoformat(),
+        })
     if Config.TARGET_GROUP_ID and group_id != Config.TARGET_GROUP_ID:
         logger.debug("Ignoring message from non-target group: %s", group_id)
         return
