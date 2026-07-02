@@ -1,7 +1,58 @@
 name: Daily Email Report
-on: workflow_dispatch
+on:
+  schedule:
+    - cron: "0 12 * * *"
+  workflow_dispatch: {}
 jobs:
   send-report:
     runs-on: ubuntu-latest
     steps:
-      - run: echo "test"
+      - name: Download archive
+        run: |
+          DATE=$(date +%Y%m%d)
+          curl -sS -o "line_archive_$DATE.xlsx" \
+            "https://line-archive-bot.onrender.com/files/line_archive_$DATE.xlsx" || \
+            echo "NO_FILE=$DATE" >> $GITHUB_ENV
+      - name: Send email
+        env:
+          SMTP_HOST: smtp.gmail.com
+          SMTP_PORT: 587
+          SMTP_USER: ${{ secrets.GMAIL_USER }}
+          SMTP_PASS: ${{ secrets.GMAIL_APP_PASSWORD }}
+          TO_EMAIL: ${{ secrets.REPORT_TO_EMAIL }}
+        run: |
+          python3 << 'PYEOF'
+import smtplib, ssl, os, glob
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
+
+date = os.popen('date +%Y%m%d').read().strip()
+files = glob.glob(f'line_archive_{date}.xlsx')
+msg = MIMEMultipart()
+msg['From'] = os.environ['SMTP_USER']
+msg['To'] = os.environ['TO_EMAIL']
+msg['Subject'] = f'LINE Archive Report - {date}'
+body = f'LINE group message archive for {date} is attached.'
+if files:
+    body += f'\n\nAttachment: line_archive_{date}.xlsx'
+else:
+    body += '\n\nNo messages recorded for this date.'
+msg.attach(MIMEText(body, 'plain', 'utf-8'))
+for f in files:
+    with open(f, 'rb') as fh:
+        part = MIMEBase('application', 'octet-stream')
+        part.set_payload(fh.read())
+    encoders.encode_base64(part)
+    part.add_header('Content-Disposition', f'attachment; filename="{os.path.basename(f)}"')
+    msg.attach(part)
+context = ssl.create_default_context()
+with smtplib.SMTP(os.environ['SMTP_HOST'], int(os.environ['SMTP_PORT']), timeout=15) as server:
+    server.ehlo()
+    server.starttls(context=context)
+    server.ehlo()
+    server.login(os.environ['SMTP_USER'], os.environ['SMTP_PASS'])
+    server.send_message(msg)
+print('Email sent OK')
+PYEOF
