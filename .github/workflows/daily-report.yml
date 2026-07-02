@@ -1,8 +1,8 @@
 name: Daily Email Report
 on:
+  workflow_dispatch:
   schedule:
     - cron: "0 12 * * *"
-  workflow_dispatch: {}
 jobs:
   send-report:
     runs-on: ubuntu-latest
