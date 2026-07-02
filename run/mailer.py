@@ -15,7 +15,7 @@ from config import Config
 
 logger = logging.getLogger(__name__)
 SMTP_HOST = "smtp.gmail.com"
-SMTP_PORT = 587
+SMTP_PORT = 465
 
 
 def _build_message(attachment_path: Optional[Path], date_str: str) -> MIMEMultipart:
@@ -46,10 +46,7 @@ def send_report(target_date: Optional[str] = None) -> bool:
     msg = _build_message(attachment_path=archive_path if archive_path.exists() else None, date_str=target_date)
     try:
         context = ssl.create_default_context()
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
-            server.ehlo()
-            server.starttls(context=context)
-            server.ehlo()
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=15, context=context) as server:
             server.login(Config.GMAIL_USER, Config.GMAIL_APP_PASSWORD)
             server.send_message(msg)
         logger.info("Report sent successfully for %s", target_date)
