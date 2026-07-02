@@ -13,7 +13,7 @@ from linebot.v3.webhook import WebhookHandler
 from linebot.v3.messaging import MessagingApi, ApiClient, Configuration, TextMessage, PushMessageRequest
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.webhooks import MessageEvent, TextMessageContent, JoinEvent
-from archiver import archive_message, get_sheet_rows, SHEET_CRITICAL, SHEET_WARNING
+from archiver import archive_message, get_sheet_rows, SHEET_CRITICAL, SHEET_WARNING, SHEET_OTHERS, _get_sheet_name
 from config import Config
 from mailer import send_report
 from sync_repo import push_xlsx, pull_xlsx
@@ -142,67 +142,95 @@ def trigger_sync():
     return jsonify({"status": "ok" if ok else "error"})
 
 
+@app.route("/debug-imports", methods=["GET"])
+def debug_imports():
+    results = {}
+    try:
+        from archiver import get_sheet_rows, _get_sheet_name, SHEET_CRITICAL, SHEET_WARNING, SHEET_OTHERS
+        results["archiver"] = "ok"
+    except Exception as e:
+        results["archiver"] = str(e)
+    try:
+        from sync_repo import push_xlsx, pull_xlsx
+        results["sync_repo"] = "ok"
+    except Exception as e:
+        results["sync_repo"] = str(e)
+    try:
+        from llm_analyzer import analyze_messages
+        results["llm_analyzer"] = "ok"
+    except Exception as e:
+        results["llm_analyzer"] = str(e)
+    try:
+        import openai
+        results["openai"] = "ok"
+    except Exception as e:
+        results["openai"] = str(e)
+    return jsonify(results)
+
+
 @app.route("/process", methods=["POST"])
 def process_archive():
-    from pathlib import Path as _Path
-    today = datetime.now(TAIPEI_TZ).strftime("%Y%m%d")
-    local_path = Config.ARCHIVE_DIR / f"line_archive_{today}.xlsx"
+    try:
+        today = datetime.now(TAIPEI_TZ).strftime("%Y%m%d")
+        local_path = Config.ARCHIVE_DIR / f"line_archive_{today}.xlsx"
 
-    pull_xlsx(today, local_path)
+        pull_xlsx(today, local_path)
 
-    critical = get_sheet_rows(local_path, SHEET_CRITICAL)
-    warning = get_sheet_rows(local_path, SHEET_WARNING)
-    others = get_sheet_rows(local_path, SHEET_OTHERS)
+        critical = get_sheet_rows(local_path, SHEET_CRITICAL)
+        warning = get_sheet_rows(local_path, SHEET_WARNING)
+        others = get_sheet_rows(local_path, SHEET_OTHERS)
 
-    all_rows = {}
-    for rows in (critical, warning, others):
-        for r in rows:
-            if len(r) >= 4:
-                key = (r[0], r[3])
-                all_rows[key] = r
+        all_rows = {}
+        for rows in (critical, warning, others):
+            for r in rows:
+                if len(r) >= 4:
+                    key = (r[0], r[3])
+                    all_rows[key] = r
 
-    sorted_rows = sorted(all_rows.values(), key=lambda r: r[0])
+        sorted_rows = sorted(all_rows.values(), key=lambda r: r[0])
 
-    from openpyxl import Workbook, load_workbook
-    from openpyxl.styles import Font
-    wb = Workbook()
-    default_ws = wb.active
-    wb.remove(default_ws)
-    bold = Font(bold=True)
-    cols = ["timestamp", "sender_name", "sender_user_id", "message"]
-    from archiver import _get_sheet_name
-    sheets_data = {SHEET_CRITICAL: [], SHEET_WARNING: [], SHEET_OTHERS: []}
-    for r in sorted_rows:
-        sname = _get_sheet_name(r[3])
-        sheets_data[sname].append(r)
-    for sname in (SHEET_CRITICAL, SHEET_WARNING, SHEET_OTHERS):
-        ws = wb.create_sheet(title=sname)
-        ws.append(cols)
-        for ci in range(1, 5):
-            ws.cell(row=1, column=ci).font = bold
-        for r in sheets_data[sname]:
-            ws.append(r)
+        from openpyxl import Workbook
+        from openpyxl.styles import Font
+        wb = Workbook()
+        default_ws = wb.active
+        wb.remove(default_ws)
+        bold = Font(bold=True)
+        cols = ["timestamp", "sender_name", "sender_user_id", "message"]
+        sheets_data = {SHEET_CRITICAL: [], SHEET_WARNING: [], SHEET_OTHERS: []}
+        for r in sorted_rows:
+            sname = _get_sheet_name(r[3])
+            sheets_data[sname].append(r)
+        for sname in (SHEET_CRITICAL, SHEET_WARNING, SHEET_OTHERS):
+            ws = wb.create_sheet(title=sname)
+            ws.append(cols)
+            for ci in range(1, 5):
+                ws.cell(row=1, column=ci).font = bold
+            for r in sheets_data[sname]:
+                ws.append(r)
 
-    wb.save(str(local_path))
-    logger.info("Dedup saved: %d critical, %d warning, %d others (%d unique)",
-                len(sheets_data[SHEET_CRITICAL]), len(sheets_data[SHEET_WARNING]),
-                len(sheets_data[SHEET_OTHERS]), len(sorted_rows))
+        wb.save(str(local_path))
+        logger.info("Dedup saved: %d critical, %d warning, %d others (%d unique)",
+                    len(sheets_data[SHEET_CRITICAL]), len(sheets_data[SHEET_WARNING]),
+                    len(sheets_data[SHEET_OTHERS]), len(sorted_rows))
 
-    push_xlsx(local_path, today, force=True)
+        push_xlsx(local_path, today, force=True)
 
-    critical_texts = [r[3] for r in sheets_data[SHEET_CRITICAL]]
-    warning_texts = [r[3] for r in sheets_data[SHEET_WARNING]]
-    analysis = analyze_messages(critical_texts, warning_texts)
+        critical_texts = [r[3] for r in sheets_data[SHEET_CRITICAL]]
+        warning_texts = [r[3] for r in sheets_data[SHEET_WARNING]]
+        analysis = analyze_messages(critical_texts, warning_texts)
 
-    return jsonify({
-        "status": "ok",
-        "date": today,
-        "unique_messages": len(sorted_rows),
-        "critical": len(critical_texts),
-        "warning": len(warning_texts),
-        "others": len(sheets_data[SHEET_OTHERS]),
-        "analysis": analysis,
-    })
+        return jsonify({
+            "status": "ok",
+            "date": today,
+            "unique_messages": len(sorted_rows),
+            "critical": len(critical_texts),
+            "warning": len(warning_texts),
+            "others": len(sheets_data[SHEET_OTHERS]),
+            "analysis": analysis,
+        })
+    except Exception as e:
+        logger.exception("/process failed")
+        return jsonify({"status": "error", "error": str(e)}), 500
 
 
 @app.route("/send-report", methods=["POST"])
