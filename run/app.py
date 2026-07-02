@@ -34,6 +34,14 @@ TAIPEI_TZ = pytz.timezone("Asia/Taipei")
 detected_group_ids: list[str] = []
 last_messages: list[dict] = []
 
+monitor = {
+    "start_time": datetime.now(TAIPEI_TZ).isoformat(),
+    "total_messages_archived": 0,
+    "last_message_time": None,
+    "errors": [],
+    "heartbeats": [],
+}
+
 
 def send_line_report(today: str) -> None:
     if not Config.TARGET_GROUP_ID:
@@ -100,6 +108,22 @@ def get_group_id():
         "last_messages": last_messages[-10:],
     })
 
+@app.route("/monitor", methods=["GET"])
+def get_monitor():
+    uptime = (datetime.now(TAIPEI_TZ) - datetime.fromisoformat(monitor["start_time"])).total_seconds()
+    return jsonify({
+        "status": "ok",
+        "start_time": monitor["start_time"],
+        "uptime_seconds": round(uptime),
+        "total_messages_archived": monitor["total_messages_archived"],
+        "last_message_time": monitor["last_message_time"],
+        "error_count": len(monitor["errors"]),
+        "recent_errors": monitor["errors"][-5:],
+        "last_heartbeat": monitor["heartbeats"][-1] if monitor["heartbeats"] else None,
+        "target_group_id": Config.TARGET_GROUP_ID,
+    })
+
+
 @app.route("/send-report", methods=["POST"])
 def trigger_report():
     today = datetime.now(TAIPEI_TZ).strftime("%Y%m%d")
@@ -147,9 +171,26 @@ def handle_text_message(event: MessageEvent) -> None:
             sender_user_id=event.source.user_id or "unknown",
             message=message.text,
         )
+        monitor["total_messages_archived"] += 1
+        monitor["last_message_time"] = datetime.now(TAIPEI_TZ).isoformat()
         logger.info("Archived message from %s to sheet [%s]", event.source.user_id, sheet)
-    except Exception:
+    except Exception as e:
+        monitor["errors"].append(str(e))
         logger.exception("Failed to archive message")
+
+
+def monitoring_job() -> None:
+    heartbeat = {
+        "time": datetime.now(TAIPEI_TZ).isoformat(),
+        "scheduler_running": scheduler.running,
+        "messages_archived": monitor["total_messages_archived"],
+    }
+    monitor["heartbeats"].append(heartbeat)
+    if len(monitor["heartbeats"]) > 100:
+        monitor["heartbeats"] = monitor["heartbeats"][-50:]
+    if len(monitor["errors"]) > 100:
+        monitor["errors"] = monitor["errors"][-50:]
+    logger.debug("Monitoring heartbeat #%d", len(monitor["heartbeats"]))
 
 
 def init_scheduler() -> None:
@@ -162,8 +203,15 @@ def init_scheduler() -> None:
         id="daily_report",
         replace_existing=True,
     )
+    scheduler.add_job(
+        func=monitoring_job,
+        trigger="interval",
+        minutes=1,
+        id="monitor_heartbeat",
+        replace_existing=True,
+    )
     scheduler.start()
-    logger.info("Scheduler started: daily report at 20:00 Asia/Taipei")
+    logger.info("Scheduler started: daily report at 20:00 Asia/Taipei, monitoring every 1min")
 
 
 def create_app() -> Flask:

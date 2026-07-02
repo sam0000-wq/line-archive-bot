@@ -3,7 +3,7 @@
     name: line-archive-bot
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app
+    startCommand: gunicorn app:app --workers=1
     healthCheckPath: /health
     rootDir: run
     envVars:
