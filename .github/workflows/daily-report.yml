@@ -2,7 +2,7 @@ name: Daily Email Report
 on:
   schedule:
     - cron: "0 12 * * *"
-  workflow_dispatch:
+  workflow_dispatch: {}
 jobs:
   send-report:
     runs-on: ubuntu-latest
