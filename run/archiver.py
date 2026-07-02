@@ -48,6 +48,25 @@ def _ensure_workbook(path: Path) -> Workbook:
     return load_workbook(str(path))
 
 
+def get_sheet_rows(path: Path, sheet_name: str) -> list[list[str]]:
+    if not path.exists():
+        return []
+    try:
+        wb = load_workbook(str(path))
+        if sheet_name not in wb.sheetnames:
+            return []
+        ws = wb[sheet_name]
+        rows = []
+        for i, row in enumerate(ws.iter_rows(values_only=True)):
+            if i == 0:
+                continue
+            rows.append([str(c) if c is not None else "" for c in row])
+        return rows
+    except Exception:
+        logger.exception("Failed to read sheet %s from %s", sheet_name, path)
+        return []
+
+
 def archive_message(timestamp: str, sender_name: str, sender_user_id: str, message: str) -> str:
     sheet_name = _get_sheet_name(message)
     path = _daily_path()

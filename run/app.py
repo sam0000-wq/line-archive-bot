@@ -13,9 +13,11 @@ from linebot.v3.webhook import WebhookHandler
 from linebot.v3.messaging import MessagingApi, ApiClient, Configuration, TextMessage, PushMessageRequest
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.webhooks import MessageEvent, TextMessageContent, JoinEvent
-from archiver import archive_message
+from archiver import archive_message, get_sheet_rows, SHEET_CRITICAL, SHEET_WARNING
 from config import Config
 from mailer import send_report
+from sync_repo import push_xlsx, pull_xlsx
+from llm_analyzer import analyze_messages
 
 logging.basicConfig(
     level=logging.INFO,
@@ -132,6 +134,77 @@ def get_monitor():
     })
 
 
+@app.route("/sync", methods=["POST"])
+def trigger_sync():
+    today = datetime.now(TAIPEI_TZ).strftime("%Y%m%d")
+    path = Config.ARCHIVE_DIR / f"line_archive_{today}.xlsx"
+    ok = push_xlsx(path, today, force=True)
+    return jsonify({"status": "ok" if ok else "error"})
+
+
+@app.route("/process", methods=["POST"])
+def process_archive():
+    from pathlib import Path as _Path
+    today = datetime.now(TAIPEI_TZ).strftime("%Y%m%d")
+    local_path = Config.ARCHIVE_DIR / f"line_archive_{today}.xlsx"
+
+    pull_xlsx(today, local_path)
+
+    critical = get_sheet_rows(local_path, SHEET_CRITICAL)
+    warning = get_sheet_rows(local_path, SHEET_WARNING)
+    others = get_sheet_rows(local_path, SHEET_OTHERS)
+
+    all_rows = {}
+    for rows in (critical, warning, others):
+        for r in rows:
+            if len(r) >= 4:
+                key = (r[0], r[3])
+                all_rows[key] = r
+
+    sorted_rows = sorted(all_rows.values(), key=lambda r: r[0])
+
+    from openpyxl import Workbook, load_workbook
+    from openpyxl.styles import Font
+    wb = Workbook()
+    default_ws = wb.active
+    wb.remove(default_ws)
+    bold = Font(bold=True)
+    cols = ["timestamp", "sender_name", "sender_user_id", "message"]
+    from archiver import _get_sheet_name
+    sheets_data = {SHEET_CRITICAL: [], SHEET_WARNING: [], SHEET_OTHERS: []}
+    for r in sorted_rows:
+        sname = _get_sheet_name(r[3])
+        sheets_data[sname].append(r)
+    for sname in (SHEET_CRITICAL, SHEET_WARNING, SHEET_OTHERS):
+        ws = wb.create_sheet(title=sname)
+        ws.append(cols)
+        for ci in range(1, 5):
+            ws.cell(row=1, column=ci).font = bold
+        for r in sheets_data[sname]:
+            ws.append(r)
+
+    wb.save(str(local_path))
+    logger.info("Dedup saved: %d critical, %d warning, %d others (%d unique)",
+                len(sheets_data[SHEET_CRITICAL]), len(sheets_data[SHEET_WARNING]),
+                len(sheets_data[SHEET_OTHERS]), len(sorted_rows))
+
+    push_xlsx(local_path, today, force=True)
+
+    critical_texts = [r[3] for r in sheets_data[SHEET_CRITICAL]]
+    warning_texts = [r[3] for r in sheets_data[SHEET_WARNING]]
+    analysis = analyze_messages(critical_texts, warning_texts)
+
+    return jsonify({
+        "status": "ok",
+        "date": today,
+        "unique_messages": len(sorted_rows),
+        "critical": len(critical_texts),
+        "warning": len(warning_texts),
+        "others": len(sheets_data[SHEET_OTHERS]),
+        "analysis": analysis,
+    })
+
+
 @app.route("/send-report", methods=["POST"])
 def trigger_report():
     today = datetime.now(TAIPEI_TZ).strftime("%Y%m%d")
@@ -182,6 +255,8 @@ def handle_text_message(event: MessageEvent) -> None:
         monitor["total_messages_archived"] += 1
         monitor["last_message_time"] = datetime.now(TAIPEI_TZ).isoformat()
         logger.info("Archived message from %s to sheet [%s]", event.source.user_id, sheet)
+        today_str = datetime.now(TAIPEI_TZ).strftime("%Y%m%d")
+        push_xlsx(Config.ARCHIVE_DIR / f"line_archive_{today_str}.xlsx", today_str)
     except Exception as e:
         monitor["errors"].append(str(e))
         logger.exception("Failed to archive message")

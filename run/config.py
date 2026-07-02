@@ -22,6 +22,8 @@ class Config:
     GMAIL_USER: str = _get_env("GMAIL_USER", "itsamliu2025@gmail.com")
     GMAIL_APP_PASSWORD: str = _get_env("GMAIL_APP_PASSWORD", "")
     REPORT_TO_EMAIL: str = _get_env("REPORT_TO_EMAIL", "itsamliu2025@gmail.com")
+    GITHUB_TOKEN: str = _get_env("GITHUB_TOKEN", "")
+    GROQ_API_KEY: str = _get_env("GROQ_API_KEY", "")
     TZ: str = _get_env("TZ", "Asia/Taipei")
     APP_PORT: int = int(_get_env("PORT", "5000"))
     BASE_URL: str = _get_env("BASE_URL", "https://line-archive-bot.onrender.com")
