@@ -46,7 +46,7 @@ def send_report(target_date: Optional[str] = None) -> bool:
     msg = _build_message(attachment_path=archive_path if archive_path.exists() else None, date_str=target_date)
     try:
         context = ssl.create_default_context()
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
             server.ehlo()
             server.starttls(context=context)
             server.ehlo()
