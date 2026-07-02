@@ -39,7 +39,8 @@ monitor = {
     "total_messages_archived": 0,
     "last_message_time": None,
     "errors": [],
-    "heartbeats": [],
+    "request_count": 0,
+    "last_request_time": None,
 }
 
 
@@ -83,6 +84,12 @@ def serve_file(filename: str):
     return send_file(str(filepath), as_attachment=True)
 
 
+@app.before_request
+def track_request():
+    monitor["request_count"] += 1
+    monitor["last_request_time"] = datetime.now(TAIPEI_TZ).isoformat()
+
+
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok", "time": datetime.now(TAIPEI_TZ).isoformat()})
@@ -115,11 +122,12 @@ def get_monitor():
         "status": "ok",
         "start_time": monitor["start_time"],
         "uptime_seconds": round(uptime),
+        "request_count": monitor["request_count"],
+        "last_request_time": monitor["last_request_time"],
         "total_messages_archived": monitor["total_messages_archived"],
         "last_message_time": monitor["last_message_time"],
         "error_count": len(monitor["errors"]),
         "recent_errors": monitor["errors"][-5:],
-        "last_heartbeat": monitor["heartbeats"][-1] if monitor["heartbeats"] else None,
         "target_group_id": Config.TARGET_GROUP_ID,
     })
 
@@ -179,20 +187,6 @@ def handle_text_message(event: MessageEvent) -> None:
         logger.exception("Failed to archive message")
 
 
-def monitoring_job() -> None:
-    heartbeat = {
-        "time": datetime.now(TAIPEI_TZ).isoformat(),
-        "scheduler_running": scheduler.running,
-        "messages_archived": monitor["total_messages_archived"],
-    }
-    monitor["heartbeats"].append(heartbeat)
-    if len(monitor["heartbeats"]) > 100:
-        monitor["heartbeats"] = monitor["heartbeats"][-50:]
-    if len(monitor["errors"]) > 100:
-        monitor["errors"] = monitor["errors"][-50:]
-    logger.debug("Monitoring heartbeat #%d", len(monitor["heartbeats"]))
-
-
 def init_scheduler() -> None:
     scheduler.add_job(
         func=scheduled_report_job,
@@ -203,15 +197,8 @@ def init_scheduler() -> None:
         id="daily_report",
         replace_existing=True,
     )
-    scheduler.add_job(
-        func=monitoring_job,
-        trigger="interval",
-        minutes=1,
-        id="monitor_heartbeat",
-        replace_existing=True,
-    )
     scheduler.start()
-    logger.info("Scheduler started: daily report at 20:00 Asia/Taipei, monitoring every 1min")
+    logger.info("Scheduler started: daily report at 20:00 Asia/Taipei")
 
 
 def create_app() -> Flask:
