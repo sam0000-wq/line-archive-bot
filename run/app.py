@@ -80,10 +80,17 @@ def scheduled_report_job() -> None:
 @app.route("/files/<path:filename>", methods=["GET"])
 def serve_file(filename: str):
     from pathlib import Path as _Path
-    filepath = Config.ARCHIVE_DIR / _Path(filename).name
-    if not filepath.exists() or not filepath.is_file():
-        abort(404, "File not found")
-    return send_file(str(filepath), as_attachment=True)
+    safe_name = _Path(filename).name
+    local_path = Config.ARCHIVE_DIR / safe_name
+    
+    if not local_path.exists():
+        date_str = safe_name.replace("line_archive_", "").replace(".xlsx", "")
+        if pull_xlsx(date_str, local_path):
+            logger.info("Pulled %s from GitHub for download", safe_name)
+        else:
+            abort(404, "File not found locally or on GitHub")
+    
+    return send_file(str(local_path), as_attachment=True)
 
 
 @app.before_request
