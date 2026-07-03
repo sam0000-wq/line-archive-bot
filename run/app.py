@@ -237,9 +237,8 @@ def process_archive():
 def trigger_report():
     today = datetime.now(TAIPEI_TZ).strftime("%Y%m%d")
     success = send_report(today)
-    if success:
-        return jsonify({"status": "ok", "date": today})
-    return jsonify({"status": "error", "date": today}), 500
+    send_line_report(today)  # 不管成敗都推播 LINE
+    return jsonify({"status": "ok" if success else "email_failed_line_sent", "date": today})
 
 
 @handler.add(JoinEvent)
