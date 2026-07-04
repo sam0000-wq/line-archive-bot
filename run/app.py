@@ -371,18 +371,12 @@ def handle_text_message(event: MessageEvent) -> None:
         today_str = datetime.now(TAIPEI_TZ).strftime("%Y%m%d")
         push_xlsx(Config.ARCHIVE_DIR / f"line_archive_{today_str}.xlsx", today_str)
 
-        # 檢查即時觸發條件
-        if sheet == SHEET_CRITICAL:
+        # 檢查即時觸發條件 (critical + warning 合計)
+        if sheet in (SHEET_CRITICAL, SHEET_WARNING):
             monitor["critical_count"] += 1
             if monitor["critical_count"] >= 3:
-                trigger_instant_report(today_str, "critical", monitor["critical_count"])
+                trigger_instant_report(today_str, "critical+warning", monitor["critical_count"])
                 monitor["critical_count"] = 0
-                monitor["last_trigger_time"] = datetime.now(TAIPEI_TZ).isoformat()
-        elif sheet == SHEET_WARNING:
-            monitor["warning_count"] += 1
-            if monitor["warning_count"] >= 3:
-                trigger_instant_report(today_str, "warning", monitor["warning_count"])
-                monitor["warning_count"] = 0
                 monitor["last_trigger_time"] = datetime.now(TAIPEI_TZ).isoformat()
     except Exception as e:
         monitor["errors"].append(str(e))
