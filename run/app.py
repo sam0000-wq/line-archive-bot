@@ -244,6 +244,7 @@ def process_archive():
         local_path = Config.ARCHIVE_DIR / f"line_archive_{today}.xlsx"
 
         pull_xlsx(today, local_path)
+        local_path.parent.mkdir(parents=True, exist_ok=True)
 
         critical = get_sheet_rows(local_path, SHEET_CRITICAL)
         warning = get_sheet_rows(local_path, SHEET_WARNING)
