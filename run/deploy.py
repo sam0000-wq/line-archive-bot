@@ -64,7 +64,7 @@ def step_render_deploy() -> bool:
         r = requests.get(f"https://api.render.com/v1/services/{service_id}/deploys?limit=1",
                          headers={"Authorization": f"Bearer {api_key}"}, timeout=10)
         data = r.json()
-        status = data.get("value", [{}])[0].get("deploy", {}).get("status", "unknown")
+        status = data[0]["deploy"]["status"] if data else "unknown"
         if status == "live":
             logger.info("Deploy live!")
             return True
