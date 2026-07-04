@@ -14,7 +14,7 @@ from linebot.v3.webhook import WebhookHandler
 from linebot.v3.messaging import MessagingApi, ApiClient, Configuration, TextMessage, PushMessageRequest
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.webhooks import MessageEvent, TextMessageContent, JoinEvent
-from archiver import archive_message, get_sheet_rows, SHEET_CRITICAL, SHEET_WARNING, SHEET_OTHERS, _get_sheet_name, get_user_display_name
+from archiver import archive_message, get_sheet_rows, SHEET_CRITICAL, SHEET_WARNING, SHEET_OTHERS, _get_sheet_name, get_user_display_name, clear_archive
 from config import Config
 from mailer import send_report
 from sync_repo import push_xlsx, pull_xlsx
@@ -107,6 +107,8 @@ def trigger_instant_report(today: str, trigger_type: str, count: int) -> bool:
             resp = requests.post(url, headers=headers, json=data, timeout=10)
             if resp.status_code == 204:
                 logger.info("GitHub Actions instant-report triggered successfully")
+                clear_archive(today)
+                push_xlsx(Config.ARCHIVE_DIR / f"line_archive_{today}.xlsx", today, force=True)
                 return True
             else:
                 logger.error("GitHub Actions trigger failed: %d %s", resp.status_code, resp.text)
@@ -124,6 +126,9 @@ def scheduled_report_job() -> None:
     else:
         logger.error("Scheduled report FAILED for %s", today)
     send_line_report(today)
+    clear_archive(today)
+    push_xlsx(Config.ARCHIVE_DIR / f"line_archive_{today}.xlsx", today, force=True)
+    logger.info("Archive cleared for %s after daily report", today)
 
 
 @app.route("/files/<path:filename>", methods=["GET"])
@@ -327,7 +332,9 @@ def process_archive():
 def trigger_report():
     today = datetime.now(TAIPEI_TZ).strftime("%Y%m%d")
     success = send_report(today)
-    send_line_report(today)  # 不管成敗都推播 LINE
+    send_line_report(today)
+    clear_archive(today)
+    push_xlsx(Config.ARCHIVE_DIR / f"line_archive_{today}.xlsx", today, force=True)
     return jsonify({"status": "ok" if success else "email_failed_line_sent", "date": today})
 
 

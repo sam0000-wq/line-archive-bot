@@ -152,3 +152,25 @@ def get_archive_path(date_str: Optional[str] = None) -> Optional[Path]:
     else:
         path = _daily_path()
     return path if path.exists() else None
+
+
+def clear_archive(date_str: Optional[str] = None) -> bool:
+    path = _daily_path() if not date_str else Config.ARCHIVE_DIR / f"line_archive_{date_str}.xlsx"
+    if not path.exists():
+        return True
+    try:
+        wb = Workbook()
+        default_ws = wb.active
+        wb.remove(default_ws)
+        bold = Font(bold=True)
+        for sheet_name, cols in [(SHEET_CRITICAL, CRITICAL_COLUMNS), (SHEET_WARNING, CRITICAL_COLUMNS), (SHEET_OTHERS, OTHERS_COLUMNS)]:
+            ws = wb.create_sheet(title=sheet_name)
+            ws.append(cols)
+            for col_idx in range(1, len(cols) + 1):
+                ws.cell(row=1, column=col_idx).font = bold
+        wb.save(str(path))
+        logger.info("Cleared archive: %s", path.name)
+        return True
+    except Exception:
+        logger.exception("Failed to clear archive %s", path)
+        return False
