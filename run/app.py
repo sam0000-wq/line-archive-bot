@@ -224,6 +224,13 @@ def debug_imports():
     return jsonify(results)
 
 
+@app.route("/debug-profile/<user_id>", methods=["GET"])
+def debug_profile(user_id: str):
+    from archiver import get_user_display_name
+    name = get_user_display_name(user_id)
+    return jsonify({"user_id": user_id, "display_name": name})
+
+
 @app.route("/process", methods=["POST"])
 def process_archive():
     try:
