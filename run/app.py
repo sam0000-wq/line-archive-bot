@@ -104,11 +104,11 @@ def trigger_instant_report(today: str, trigger_type: str, count: int) -> bool:
         }
         data = {"ref": "main"}
         try:
+            push_xlsx(Config.ARCHIVE_DIR / f"line_archive_{today}.xlsx", today, force=True)
             resp = requests.post(url, headers=headers, json=data, timeout=10)
             if resp.status_code == 204:
                 logger.info("GitHub Actions instant-report triggered successfully")
                 clear_archive(today)
-                push_xlsx(Config.ARCHIVE_DIR / f"line_archive_{today}.xlsx", today, force=True)
                 return True
             else:
                 logger.error("GitHub Actions trigger failed: %d %s", resp.status_code, resp.text)
@@ -120,6 +120,7 @@ def trigger_instant_report(today: str, trigger_type: str, count: int) -> bool:
 def scheduled_report_job() -> None:
     today = datetime.now(TAIPEI_TZ).strftime("%Y%m%d")
     logger.info("Scheduled report triggered for %s", today)
+    push_xlsx(Config.ARCHIVE_DIR / f"line_archive_{today}.xlsx", today, force=True)
     success = send_report(today)
     if success:
         logger.info("Scheduled report sent OK for %s", today)
@@ -127,7 +128,6 @@ def scheduled_report_job() -> None:
         logger.error("Scheduled report FAILED for %s", today)
     send_line_report(today)
     clear_archive(today)
-    push_xlsx(Config.ARCHIVE_DIR / f"line_archive_{today}.xlsx", today, force=True)
     logger.info("Archive cleared for %s after daily report", today)
 
 
@@ -331,10 +331,10 @@ def process_archive():
 @app.route("/send-report", methods=["POST"])
 def trigger_report():
     today = datetime.now(TAIPEI_TZ).strftime("%Y%m%d")
+    push_xlsx(Config.ARCHIVE_DIR / f"line_archive_{today}.xlsx", today, force=True)
     success = send_report(today)
     send_line_report(today)
     clear_archive(today)
-    push_xlsx(Config.ARCHIVE_DIR / f"line_archive_{today}.xlsx", today, force=True)
     return jsonify({"status": "ok" if success else "email_failed_line_sent", "date": today})
 
 
