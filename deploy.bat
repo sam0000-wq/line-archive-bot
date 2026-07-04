@@ -2,6 +2,9 @@
 chcp 65001 >nul 2>&1
 setlocal EnableDelayedExpansion
 
+set RENDER_API_KEY=rnd_ohtuqV5qS7KdPFw5YA28Ci9PzEvG
+set RENDER_SERVICE_ID=srv-d92hf8faqgkc739e03qg
+
 title LINE Archive Bot - Deploy
 color 0B
 
