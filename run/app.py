@@ -14,7 +14,7 @@ from linebot.v3.webhook import WebhookHandler
 from linebot.v3.messaging import MessagingApi, ApiClient, Configuration, TextMessage, PushMessageRequest
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.webhooks import MessageEvent, TextMessageContent, JoinEvent
-from archiver import archive_message, get_sheet_rows, SHEET_CRITICAL, SHEET_WARNING, SHEET_OTHERS, _get_sheet_name
+from archiver import archive_message, get_sheet_rows, SHEET_CRITICAL, SHEET_WARNING, SHEET_OTHERS, _get_sheet_name, get_user_display_name
 from config import Config
 from mailer import send_report
 from sync_repo import push_xlsx, pull_xlsx
@@ -239,8 +239,8 @@ def process_archive():
         all_rows = {}
         for rows in (critical, warning, others):
             for r in rows:
-                if len(r) >= 4:
-                    key = (r[0], r[3])
+                if len(r) >= 5:
+                    key = (r[0], r[3], r[4])
                     all_rows[key] = r
 
         sorted_rows = sorted(all_rows.values(), key=lambda r: r[0])
@@ -251,15 +251,15 @@ def process_archive():
         default_ws = wb.active
         wb.remove(default_ws)
         bold = Font(bold=True)
-        cols = ["timestamp", "sender_name", "sender_user_id", "message"]
+        cols = ["timestamp", "sender_name", "sender_user_id", "prefix", "message"]
         sheets_data = {SHEET_CRITICAL: [], SHEET_WARNING: [], SHEET_OTHERS: []}
         for r in sorted_rows:
-            sname = _get_sheet_name(r[3])
+            sname = _get_sheet_name(r[3]) if r[3] else SHEET_OTHERS
             sheets_data[sname].append(r)
         for sname in (SHEET_CRITICAL, SHEET_WARNING, SHEET_OTHERS):
             ws = wb.create_sheet(title=sname)
             ws.append(cols)
-            for ci in range(1, 5):
+            for ci in range(1, 6):
                 ws.cell(row=1, column=ci).font = bold
             for r in sheets_data[sname]:
                 ws.append(r)
@@ -271,8 +271,8 @@ def process_archive():
 
         push_xlsx(local_path, today, force=True)
 
-        critical_texts = [r[3] for r in sheets_data[SHEET_CRITICAL]]
-        warning_texts = [r[3] for r in sheets_data[SHEET_WARNING]]
+        critical_texts = [f"{r[3]}，{r[4]}" for r in sheets_data[SHEET_CRITICAL]]
+        warning_texts = [f"{r[3]}，{r[4]}" for r in sheets_data[SHEET_WARNING]]
         analysis = analyze_messages(critical_texts, warning_texts)
 
         return jsonify({
@@ -329,15 +329,16 @@ def handle_text_message(event: MessageEvent) -> None:
         return
     timestamp = datetime.fromtimestamp(event.timestamp / 1000.0, tz=TAIPEI_TZ).strftime("%Y-%m-%d %H:%M:%S")
     try:
+        display_name = get_user_display_name(event.source.user_id)
         sheet = archive_message(
             timestamp=timestamp,
-            sender_name=event.source.user_id or "unknown",
+            sender_name=display_name,
             sender_user_id=event.source.user_id or "unknown",
             message=message.text,
         )
         monitor["total_messages_archived"] += 1
         monitor["last_message_time"] = datetime.now(TAIPEI_TZ).isoformat()
-        logger.info("Archived message from %s to sheet [%s]", event.source.user_id, sheet)
+        logger.info("Archived message from %s (%s) to sheet [%s]", display_name, event.source.user_id, sheet)
 
         today_str = datetime.now(TAIPEI_TZ).strftime("%Y%m%d")
         push_xlsx(Config.ARCHIVE_DIR / f"line_archive_{today_str}.xlsx", today_str)

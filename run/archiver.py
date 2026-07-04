@@ -2,6 +2,7 @@
 """Message classification and xlsx archiving module."""
 
 import logging
+import requests as http_requests
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -10,10 +11,13 @@ from openpyxl.styles import Font
 from config import Config
 
 logger = logging.getLogger(__name__)
-COLUMNS = ["timestamp", "sender_name", "sender_user_id", "message"]
+COLUMNS = ["timestamp", "sender_name", "sender_user_id", "prefix", "message"]
 SHEET_CRITICAL = "critical"
 SHEET_WARNING = "warning"
 SHEET_OTHERS = "others"
+
+_profile_cache: dict[str, str] = {}
+DELIMITERS = (",", "，")
 
 
 def _daily_path(date: Optional[datetime] = None) -> Path:
@@ -24,12 +28,41 @@ def _daily_path(date: Optional[datetime] = None) -> Path:
     return Config.ARCHIVE_DIR / filename
 
 
-def _get_sheet_name(text: str) -> str:
-    cleaned = text.lower().lstrip()
-    for prefix in ("critical", "warning"):
-        if cleaned.startswith(prefix):
-            return SHEET_CRITICAL if prefix == "critical" else SHEET_WARNING
+def _get_sheet_name(prefix: str) -> str:
+    cleaned = prefix.lower().strip()
+    if cleaned == "critical":
+        return SHEET_CRITICAL
+    elif cleaned == "warning":
+        return SHEET_WARNING
     return SHEET_OTHERS
+
+
+def get_user_display_name(user_id: str) -> str:
+    if user_id in _profile_cache:
+        return _profile_cache[user_id]
+    if not Config.LINE_CHANNEL_ACCESS_TOKEN:
+        _profile_cache[user_id] = user_id
+        return user_id
+    try:
+        url = f"https://api.line.me/v2/bot/profile/{user_id}"
+        headers = {"Authorization": f"Bearer {Config.LINE_CHANNEL_ACCESS_TOKEN}"}
+        resp = http_requests.get(url, headers=headers, timeout=5)
+        if resp.status_code == 200:
+            display_name = resp.json().get("displayName", user_id)
+            _profile_cache[user_id] = display_name
+            return display_name
+    except Exception:
+        pass
+    _profile_cache[user_id] = user_id
+    return user_id
+
+
+def split_message(message: str) -> tuple[str, str]:
+    for d in DELIMITERS:
+        if d in message:
+            parts = message.split(d, 1)
+            return parts[0].strip(), parts[1].strip() if len(parts) > 1 else ""
+    return "", message
 
 
 def _ensure_workbook(path: Path) -> Workbook:
@@ -68,14 +101,15 @@ def get_sheet_rows(path: Path, sheet_name: str) -> list[list[str]]:
 
 
 def archive_message(timestamp: str, sender_name: str, sender_user_id: str, message: str) -> str:
-    sheet_name = _get_sheet_name(message)
+    prefix, content = split_message(message)
+    sheet_name = _get_sheet_name(prefix) if prefix else SHEET_OTHERS
     path = _daily_path()
     try:
         wb = _ensure_workbook(path)
         ws = wb[sheet_name]
-        ws.append([timestamp, sender_name, sender_user_id, message])
+        ws.append([timestamp, sender_name, sender_user_id, prefix, content])
         wb.save(str(path))
-        logger.info("Archived to [%s] %s: %s", sheet_name, path.name, message[:60])
+        logger.info("Archived to [%s] %s: [%s] %s", sheet_name, path.name, prefix, content[:60])
         return sheet_name
     except Exception:
         logger.exception("Failed to archive message to %s", path)
