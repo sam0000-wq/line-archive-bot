@@ -5,11 +5,17 @@ jobs:
   send-instant-report:
     runs-on: ubuntu-latest
     steps:
-      - name: Download xlsx from private repo
+      - name: Download xlsx
         run: |
           DATE=$(date +%Y%m%d)
           FILE="line_archive_$DATE.xlsx"
-          curl -sS -H "Authorization: token ${{ secrets.REPO_PAT }}"             -H "Accept: application/vnd.github.v3+json"             "https://api.github.com/repos/sam0000-wq/line-archive-data/contents/$FILE"             | python3 -c "import sys,json,base64; d=json.load(sys.stdin); open('$FILE','wb').write(base64.b64decode(d['content']))"             && echo "Downloaded $FILE"             || echo "NOT_FOUND=1" >> $GITHUB_ENV
+          curl -sS -H "Authorization: token ${{ secrets.REPO_PAT }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/sam0000-wq/line-archive-data/contents/$FILE" \
+            | python3 -c "import sys,json,base64; d=json.load(sys.stdin); open('$FILE','wb').write(base64.b64decode(d['content']))" \
+            && echo "Downloaded $FILE" \
+            || echo "NOT_FOUND=1" >> $GITHUB_ENV
+          echo "DATE=$DATE" >> $GITHUB_ENV
       - name: Send email
         if: env.NOT_FOUND != '1'
         uses: dawidd6/action-send-mail@v3
@@ -22,8 +28,10 @@ jobs:
           to: ${{ secrets.REPORT_TO_EMAIL }}
           from: ${{ secrets.GMAIL_USER }}
           body: "Critical/Warning messages reached threshold. Archive is attached."
-          attachments: "line_archive_$(date +%Y%m%d).xlsx"
+          attachments: "line_archive_${{ env.DATE }}.xlsx"
       - name: LINE notify
         run: |
-          DATE=$(date +%Y%m%d)
-          curl -sS -X POST https://api.line.me/v2/bot/message/push             -H "Authorization: Bearer ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}"             -H "Content-Type: application/json"             -d "{\"to\":\"${{ secrets.TARGET_GROUP_ID }}\",\"messages\":[{\"type\":\"text\",\"text\":\"Instant report email sent for $DATE\"}]}"
+          curl -sS -X POST https://api.line.me/v2/bot/message/push \
+            -H "Authorization: Bearer ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"to\":\"${{ secrets.TARGET_GROUP_ID }}\",\"messages\":[{\"type\":\"text\",\"text\":\"Instant report email sent for ${{ env.DATE }}. Download: https://line-archive-bot.onrender.com/files/line_archive_${{ env.DATE }}.xlsx\"}]}"
