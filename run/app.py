@@ -41,6 +41,26 @@ TAIPEI_TZ = pytz.timezone("Asia/Taipei")
 detected_group_ids: list[str] = []
 last_messages: list[dict] = []
 
+COUNTER_FILE = Config.ARCHIVE_DIR / "trigger_counter.json"
+
+def _load_counter() -> int:
+    try:
+        if COUNTER_FILE.exists():
+            import json as _json
+            data = _json.loads(COUNTER_FILE.read_text(encoding="utf-8"))
+            return data.get("critical_count", 0)
+    except Exception:
+        logger.exception("Failed to load counter")
+    return 0
+
+def _save_counter(count: int) -> None:
+    try:
+        COUNTER_FILE.parent.mkdir(parents=True, exist_ok=True)
+        import json as _json
+        COUNTER_FILE.write_text(_json.dumps({"critical_count": count, "updated": datetime.now(TAIPEI_TZ).isoformat()}), encoding="utf-8")
+    except Exception:
+        logger.exception("Failed to save counter")
+
 monitor = {
     "start_time": datetime.now(TAIPEI_TZ).isoformat(),
     "total_messages_archived": 0,
@@ -48,7 +68,7 @@ monitor = {
     "errors": [],
     "request_count": 0,
     "last_request_time": None,
-    "critical_count": 0,
+    "critical_count": _load_counter(),
     "warning_count": 0,
     "last_trigger_time": None,
 }
@@ -229,6 +249,8 @@ def get_monitor():
         "error_count": len(monitor["errors"]),
         "recent_errors": monitor["errors"][-5:],
         "target_group_id": Config.TARGET_GROUP_ID,
+        "critical_count": monitor["critical_count"],
+        "last_trigger_time": monitor["last_trigger_time"],
     })
 
 
@@ -271,6 +293,29 @@ def debug_profile(user_id: str):
     from archiver import get_user_display_name
     name = get_user_display_name(user_id)
     return jsonify({"user_id": user_id, "display_name": name})
+
+
+@app.route("/debug-xlsx", methods=["GET"])
+def debug_xlsx():
+    today = datetime.now(TAIPEI_TZ).strftime("%Y%m%d")
+    local_path = Config.ARCHIVE_DIR / f"line_archive_{today}.xlsx"
+    if not local_path.exists():
+        return jsonify({"error": f"No xlsx for {today}"}), 404
+    from archiver import get_sheet_rows, SHEET_CRITICAL, SHEET_WARNING, SHEET_OTHERS
+    critical = get_sheet_rows(local_path, SHEET_CRITICAL)
+    warning = get_sheet_rows(local_path, SHEET_WARNING)
+    others = get_sheet_rows(local_path, SHEET_OTHERS)
+    return jsonify({
+        "date": today,
+        "file": str(local_path),
+        "critical_count": len(critical),
+        "warning_count": len(warning),
+        "others_count": len(others),
+        "critical_rows": critical,
+        "warning_rows": warning,
+        "others_rows": others[:5],
+        "critical_count_trigger": monitor["critical_count"],
+    })
 
 
 @app.route("/process", methods=["POST"])
@@ -428,9 +473,11 @@ def handle_text_message(event: MessageEvent) -> None:
 
         if sheet in (SHEET_CRITICAL, SHEET_WARNING):
             monitor["critical_count"] += 1
+            _save_counter(monitor["critical_count"])
             if monitor["critical_count"] >= 5:
                 trigger_instant_report(today_str, "critical+warning", monitor["critical_count"])
                 monitor["critical_count"] = 0
+                _save_counter(0)
                 monitor["last_trigger_time"] = datetime.now(TAIPEI_TZ).isoformat()
     except Exception as e:
         monitor["errors"].append(str(e))

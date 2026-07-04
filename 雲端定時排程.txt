@@ -1,0 +1,24 @@
+Webhook 設定正確 (active: true)。服務可能休眠導致訊息超時。讓我確認服務維持喚醒後再看：
+> 不能讓它一直維持在清醒狀態嗎? 或是每隔多久, 自動送一個需求給它, 讓它維持住?
+可以，用免費的 cron-job.org 每 10 分鐘打一次 /health，就不會休眠了。
+
+到 https://cron-job.org 註冊
+新增 cron job：
+URL: https://line-archive-bot.onrender.com/health
+Interval: Every 10 minutes
+其他預設即可
+
+----------------
+
+Render 的免費方案不支援 Cron Job 服務。不過我可以用 GitHub Actions 來做 — 每 10 分鐘打一次 /health，完全免費：
+
+完成！GitHub Actions 已設定為每 10 分鐘自動 ping /health，服務不會再休眠了。
+
+現在服務是清醒的，請再傳一則訊息到群組試試。
+
+--------------
+
+前端已經有 keep-alive ping，所以暫時不一定要。不過如果你想要更穩（關瀏覽器也不睡），我可以加一支 GitHub Actions workflow。
+
+先處理資料上傳 — 檔案很小（198KB），直接 git commit 到 repo 然後讓 Render 重新 build + ingest：
+
