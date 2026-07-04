@@ -15,7 +15,7 @@ from linebot.v3.messaging import MessagingApi, ApiClient, Configuration, TextMes
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.webhooks import MessageEvent, TextMessageContent, JoinEvent
 from archiver import (
-    archive_message, get_sheet_rows, clear_archive, write_llm_analysis,
+    archive_message, get_sheet_rows, clear_archive, write_llm_analysis, create_chart_sheet,
     SHEET_CRITICAL, SHEET_WARNING, SHEET_REPORT, SHEET_OTHERS, SHEET_LLM,
     _get_sheet_name, get_user_display_name, split_message, PREFIX_SHEETS,
 )
@@ -109,7 +109,8 @@ def trigger_instant_report(today: str, trigger_type: str, count: int) -> bool:
         others_texts = [r[2] for r in others]
         analysis = analyze_messages(critical_texts, warning_texts, report_texts, others_texts)
         write_llm_analysis(local_path, analysis)
-        logger.info("LLM analysis done before instant report")
+        create_chart_sheet(local_path)
+        logger.info("LLM analysis + chart done before instant report")
     except Exception:
         logger.exception("LLM analysis failed before instant report")
 
@@ -177,7 +178,8 @@ def scheduled_report_job() -> None:
         others_texts = [r[2] for r in others]
         analysis = analyze_messages(critical_texts, warning_texts, report_texts, others_texts)
         write_llm_analysis(local_path, analysis)
-        logger.info("LLM analysis done before daily report")
+        create_chart_sheet(local_path)
+        logger.info("LLM analysis + chart done before daily report")
     except Exception:
         logger.exception("LLM analysis failed before daily report")
 
@@ -409,6 +411,7 @@ def process_archive():
         analysis = analyze_messages(critical_texts, warning_texts, report_texts, others_texts)
 
         write_llm_analysis(local_path, analysis)
+        create_chart_sheet(local_path)
         push_xlsx(local_path, today, force=True)
 
         return jsonify({

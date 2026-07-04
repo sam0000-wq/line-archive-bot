@@ -7,7 +7,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Font
+from openpyxl.styles import Font, Alignment
+from openpyxl.chart import PieChart, BarChart, Reference
+from openpyxl.utils import get_column_letter
+import re
 from config import Config
 
 logger = logging.getLogger(__name__)
@@ -19,6 +22,7 @@ SHEET_WARNING = "warning"
 SHEET_REPORT = "report"
 SHEET_OTHERS = "others"
 SHEET_LLM = "LLM"
+SHEET_CHART = "chart"
 PREFIX_SHEETS = (SHEET_CRITICAL, SHEET_WARNING, SHEET_REPORT)
 
 _profile_cache: dict[str, str] = {}
@@ -214,3 +218,122 @@ def get_archive_path(date_str: Optional[str] = None) -> Optional[Path]:
     else:
         path = _daily_path()
     return path if path.exists() else None
+
+
+STATION_KEYWORDS = {
+    "組裝": "組裝站",
+    "SMT": "組裝站",
+    "DIP": "組裝站",
+    "焊接": "組裝站",
+    "測試": "測試站",
+    "Burn-in": "測試站",
+    "stress": "測試站",
+    "BIOS": "測試站",
+    "DIMM": "測試站",
+    "GPU": "測試站",
+    "包裝": "包裝站",
+    "出貨": "包裝站",
+    "品檢": "包裝站",
+    "外觀": "包裝站",
+    "物料": "物料站",
+    "進貨": "物料站",
+    "來料": "物料站",
+    "庫存": "物料站",
+    "倉庫": "物料站",
+    "發料": "物料站",
+}
+
+
+def _extract_station(message: str) -> str:
+    for keyword, station in STATION_KEYWORDS.items():
+        if keyword.lower() in message.lower():
+            return station
+    return "其他"
+
+
+def create_chart_sheet(path: Path) -> None:
+    try:
+        wb = load_workbook(str(path))
+
+        critical = get_sheet_rows(path, SHEET_CRITICAL)
+        warning = get_sheet_rows(path, SHEET_WARNING)
+        report = get_sheet_rows(path, SHEET_REPORT)
+        others = get_sheet_rows(path, SHEET_OTHERS)
+
+        type_counts = {
+            "CRITICAL": len(critical),
+            "WARNING": len(warning),
+            "REPORT": len(report),
+            "OTHERS": len(others),
+        }
+
+        station_counts: dict[str, int] = {}
+        for sheet_rows in [critical, warning, report, others]:
+            for r in sheet_rows:
+                msg = r[3] if len(r) >= 4 else (r[2] if len(r) >= 3 else "")
+                station = _extract_station(msg)
+                station_counts[station] = station_counts.get(station, 0) + 1
+
+        if SHEET_CHART in wb.sheetnames:
+            del wb[SHEET_CHART]
+        ws = wb.create_sheet(title=SHEET_CHART)
+
+        bold = Font(bold=True, size=12)
+        ws["A1"] = "訊息分類統計"
+        ws["A1"].font = bold
+        ws["A2"] = "類別"
+        ws["B2"] = "數量"
+        ws["A2"].font = Font(bold=True)
+        ws["B2"].font = Font(bold=True)
+        row = 3
+        for label, count in type_counts.items():
+            ws.cell(row=row, column=1, value=label)
+            ws.cell(row=row, column=2, value=count)
+            row += 1
+
+        ws["D1"] = "站點統計"
+        ws["D1"].font = bold
+        ws["D2"] = "站點"
+        ws["E2"] = "數量"
+        ws["D2"].font = Font(bold=True)
+        ws["E2"].font = Font(bold=True)
+        row = 3
+        for station, count in sorted(station_counts.items(), key=lambda x: -x[1]):
+            ws.cell(row=row, column=4, value=station)
+            ws.cell(row=row, column=5, value=count)
+            row += 1
+
+        ws.column_dimensions["A"].width = 15
+        ws.column_dimensions["B"].width = 10
+        ws.column_dimensions["D"].width = 15
+        ws.column_dimensions["E"].width = 10
+
+        pie = PieChart()
+        pie.title = "訊息分類占比"
+        pie.style = 10
+        data = Reference(ws, min_col=2, min_row=2, max_row=6)
+        cats = Reference(ws, min_col=1, min_row=3, max_row=6)
+        pie.add_data(data, titles_from_data=True)
+        pie.set_categories(cats)
+        pie.width = 16
+        pie.height = 10
+        ws.add_chart(pie, "A8")
+
+        bar = BarChart()
+        bar.title = "各站點訊息數"
+        bar.style = 10
+        bar.type = "col"
+        bar.y_axis.title = "數量"
+        station_row_end = 2 + len(station_counts)
+        data2 = Reference(ws, min_col=5, min_row=2, max_row=station_row_end)
+        cats2 = Reference(ws, min_col=4, min_row=3, max_row=station_row_end)
+        bar.add_data(data2, titles_from_data=True)
+        bar.set_categories(cats2)
+        bar.width = 16
+        bar.height = 10
+        ws.add_chart(bar, "J8")
+
+        wb.save(str(path))
+        logger.info("Chart sheet created in %s", path.name)
+    except Exception:
+        logger.exception("Failed to create chart sheet in %s", path)
