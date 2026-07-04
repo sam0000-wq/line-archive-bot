@@ -428,7 +428,7 @@ def handle_text_message(event: MessageEvent) -> None:
 
         if sheet in (SHEET_CRITICAL, SHEET_WARNING):
             monitor["critical_count"] += 1
-            if monitor["critical_count"] >= 3:
+            if monitor["critical_count"] >= 5:
                 trigger_instant_report(today_str, "critical+warning", monitor["critical_count"])
                 monitor["critical_count"] = 0
                 monitor["last_trigger_time"] = datetime.now(TAIPEI_TZ).isoformat()
