@@ -75,6 +75,26 @@ def send_line_report(today: str) -> None:
 
 
 def trigger_instant_report(today: str, trigger_type: str, count: int) -> bool:
+    local_path = Config.ARCHIVE_DIR / f"line_archive_{today}.xlsx"
+
+    # 0. LLM 分析 + 寫入 xlsx
+    try:
+        critical = get_sheet_rows(local_path, SHEET_CRITICAL)
+        warning = get_sheet_rows(local_path, SHEET_WARNING)
+        others = get_sheet_rows(local_path, SHEET_OTHERS)
+        critical_texts = [f"{r[2]}，{r[3]}" for r in critical]
+        warning_texts = [f"{r[2]}，{r[3]}" for r in warning]
+        others_texts = [r[2] for r in others]
+        analysis = analyze_messages(critical_texts, warning_texts, others_texts)
+        write_llm_analysis(local_path, analysis)
+        logger.info("LLM analysis done before instant report")
+    except Exception:
+        logger.exception("LLM analysis failed before instant report")
+
+    # 1. 推送完整 xlsx 到 GitHub
+    push_xlsx(local_path, today, force=True)
+
+    # 2. 發送 LINE 即時通知
     if Config.TARGET_GROUP_ID:
         msg = (
             f"🚨 即時觸發報告 ({trigger_type} 達 {count} 筆)\n"
@@ -120,8 +140,24 @@ def trigger_instant_report(today: str, trigger_type: str, count: int) -> bool:
 
 def scheduled_report_job() -> None:
     today = datetime.now(TAIPEI_TZ).strftime("%Y%m%d")
+    local_path = Config.ARCHIVE_DIR / f"line_archive_{today}.xlsx"
     logger.info("Scheduled report triggered for %s", today)
-    push_xlsx(Config.ARCHIVE_DIR / f"line_archive_{today}.xlsx", today, force=True)
+
+    # LLM 分析 + 寫入 xlsx
+    try:
+        critical = get_sheet_rows(local_path, SHEET_CRITICAL)
+        warning = get_sheet_rows(local_path, SHEET_WARNING)
+        others = get_sheet_rows(local_path, SHEET_OTHERS)
+        critical_texts = [f"{r[2]}，{r[3]}" for r in critical]
+        warning_texts = [f"{r[2]}，{r[3]}" for r in warning]
+        others_texts = [r[2] for r in others]
+        analysis = analyze_messages(critical_texts, warning_texts, others_texts)
+        write_llm_analysis(local_path, analysis)
+        logger.info("LLM analysis done before daily report")
+    except Exception:
+        logger.exception("LLM analysis failed before daily report")
+
+    push_xlsx(local_path, today, force=True)
     success = send_report(today)
     if success:
         logger.info("Scheduled report sent OK for %s", today)
