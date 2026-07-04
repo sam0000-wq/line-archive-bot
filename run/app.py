@@ -1,6 +1,7 @@
 ﻿# -*- coding: utf-8 -*-
 """Flask webhook server for LINE message archiving."""
 
+import json
 import logging
 import os
 import sys
@@ -43,6 +44,9 @@ monitor = {
     "errors": [],
     "request_count": 0,
     "last_request_time": None,
+    "critical_count": 0,
+    "warning_count": 0,
+    "last_trigger_time": None,
 }
 
 
@@ -64,6 +68,51 @@ def send_line_report(today: str) -> None:
         logger.info("LINE group notification sent for %s", today)
     except Exception:
         logger.exception("Failed to send LINE group notification for %s", today)
+
+
+def trigger_instant_report(today: str, trigger_type: str, count: int) -> bool:
+    """觸發 GitHub Actions 即時報告 + 發送 LINE 即時通知"""
+    # 1. 發送 LINE 即時通知
+    if Config.TARGET_GROUP_ID:
+        msg = (
+            f"🚨 即時觸發報告 ({trigger_type} 達 {count} 筆)\n"
+            f"日期: {today}\n"
+            f"已觸發 GitHub Actions 寄送 Email (含 xlsx 附件)\n"
+            f"下載: {Config.BASE_URL}/files/line_archive_{today}.xlsx"
+        )
+        try:
+            with ApiClient(configuration) as api_client:
+                messaging_api = MessagingApi(api_client)
+                messaging_api.push_message(
+                    PushMessageRequest(
+                        to=Config.TARGET_GROUP_ID,
+                        messages=[TextMessage(text=msg)],
+                    )
+                )
+            logger.info("Instant LINE notification sent for %s (%s=%d)", today, trigger_type, count)
+        except Exception:
+            logger.exception("Failed to send instant LINE notification")
+
+    # 2. 觸發 GitHub Actions workflow_dispatch
+    if Config.GITHUB_TOKEN:
+        import requests
+        url = f"https://api.github.com/repos/sam0000-wq/line-archive-bot/actions/workflows/instant-report.yml/dispatches"
+        headers = {
+            "Authorization": f"Bearer {Config.GITHUB_TOKEN}",
+            "Accept": "application/vnd.github.v3+json",
+            "Content-Type": "application/json",
+        }
+        data = {"ref": "main"}
+        try:
+            resp = requests.post(url, headers=headers, json=data, timeout=10)
+            if resp.status_code == 204:
+                logger.info("GitHub Actions instant-report triggered successfully")
+                return True
+            else:
+                logger.error("GitHub Actions trigger failed: %d %s", resp.status_code, resp.text)
+        except Exception:
+            logger.exception("Failed to trigger GitHub Actions")
+    return False
 
 
 def scheduled_report_job() -> None:
@@ -289,8 +338,23 @@ def handle_text_message(event: MessageEvent) -> None:
         monitor["total_messages_archived"] += 1
         monitor["last_message_time"] = datetime.now(TAIPEI_TZ).isoformat()
         logger.info("Archived message from %s to sheet [%s]", event.source.user_id, sheet)
+
         today_str = datetime.now(TAIPEI_TZ).strftime("%Y%m%d")
         push_xlsx(Config.ARCHIVE_DIR / f"line_archive_{today_str}.xlsx", today_str)
+
+        # 檢查即時觸發條件
+        if sheet == SHEET_CRITICAL:
+            monitor["critical_count"] += 1
+            if monitor["critical_count"] >= 3:
+                trigger_instant_report(today_str, "critical", monitor["critical_count"])
+                monitor["critical_count"] = 0
+                monitor["last_trigger_time"] = datetime.now(TAIPEI_TZ).isoformat()
+        elif sheet == SHEET_WARNING:
+            monitor["warning_count"] += 1
+            if monitor["warning_count"] >= 3:
+                trigger_instant_report(today_str, "warning", monitor["warning_count"])
+                monitor["warning_count"] = 0
+                monitor["last_trigger_time"] = datetime.now(TAIPEI_TZ).isoformat()
     except Exception as e:
         monitor["errors"].append(str(e))
         logger.exception("Failed to archive message")
