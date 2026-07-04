@@ -232,19 +232,25 @@ def process_archive():
 
         pull_xlsx(today, local_path)
 
-        from archiver import _ensure_workbook
-        _ensure_workbook(local_path)
-
         critical = get_sheet_rows(local_path, SHEET_CRITICAL)
         warning = get_sheet_rows(local_path, SHEET_WARNING)
         others = get_sheet_rows(local_path, SHEET_OTHERS)
 
+        from archiver import split_message
         all_rows = {}
         for rows in (critical, warning, others):
             for r in rows:
                 if len(r) >= 5:
-                    key = (r[0], r[3], r[4])
-                    all_rows[key] = r
+                    prefix, content = r[3], r[4]
+                elif len(r) >= 4:
+                    prefix, content = split_message(r[3])
+                else:
+                    continue
+                ts = r[0]
+                name = r[1] if len(r) > 1 else ""
+                uid = r[2] if len(r) > 2 else ""
+                key = (ts, prefix, content)
+                all_rows[key] = [ts, name, uid, prefix, content]
 
         sorted_rows = sorted(all_rows.values(), key=lambda r: r[0])
 
