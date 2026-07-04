@@ -486,7 +486,7 @@ def handle_text_message(event: MessageEvent) -> None:
         if sheet in (SHEET_CRITICAL, SHEET_WARNING):
             monitor["critical_count"] += 1
             _save_counter(monitor["critical_count"])
-            if monitor["critical_count"] >= 5:
+            if monitor["critical_count"] >= 4:
                 trigger_instant_report(today_str, "critical+warning", monitor["critical_count"])
                 monitor["critical_count"] = 0
                 _save_counter(0)
