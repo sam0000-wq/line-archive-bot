@@ -22,22 +22,47 @@ def analyze_messages(critical: list[str], warning: list[str], others: list[str] 
 
     parts = []
     if critical:
-        parts.append("=== 重要訊息 (critical) ===")
-        for m in critical[-20:]:
-            parts.append(f"- {m}")
+        parts.append("=== CRITICAL（重大異常）===")
+        for i, m in enumerate(critical[-20:], 1):
+            parts.append(f"  C{i}. {m}")
     if warning:
-        parts.append("=== 警告訊息 (warning) ===")
-        for m in warning[-20:]:
-            parts.append(f"- {m}")
+        parts.append("=== WARNING（警告事項）===")
+        for i, m in enumerate(warning[-20:], 1):
+            parts.append(f"  W{i}. {m}")
     if others:
-        parts.append("=== 一般訊息 (others) ===")
-        for m in others[-20:]:
-            parts.append(f"- {m}")
+        parts.append("=== OTHERS（一般回報）===")
+        for i, m in enumerate(others[-20:], 1):
+            parts.append(f"  O{i}. {m}")
 
     prompt = (
-        "你是一個 LINE 群組訊息分析助手。以下是今日收集到的訊息，請整理出重點摘要。\n\n"
+        "你是一位資深製造業廠務分析師，專精於半導體/電子製造產線管理。\n"
+        "請根據以下產線即時回報訊息，產出一份專業的【產線異常分析報告】。\n\n"
+        "## 輸入訊息\n"
         + "\n".join(parts)
-        + "\n\n請用繁體中文提供：\n1. 重點摘要\n2. 需要採取行動的項目（若無則略過）\n3. 關注趨勢"
+        + "\n\n"
+        "## 輸出格式（嚴格依循）\n\n"
+        "### 一、摘要總覽\n"
+        "- 統計：CRITICAL X項、WARNING Y項、一般 Z項\n"
+        "- 影響範圍：（設備/製程/人員/物料/環境）\n"
+        "- 產線狀態：（正常/輕微受影響/嚴重受影響/停線）\n\n"
+        "### 二、CRITICAL 重大異常分析\n"
+        "逐一列出每項 CRITICAL 訊息，包含：\n"
+        "- 問題描述\n"
+        "- 可能 root cause（至少列出2個可能原因）\n"
+        "- 影響評估（停機時間/產能損失/良率影響）\n"
+        "- 建議處理優先順序（P1/P2/P3）\n\n"
+        "### 三、WARNING 警告事項分析\n"
+        "逐一列出每項 WARNING 訊息，包含：\n"
+        "- 異常現象\n"
+        "- 預防性建議（避免升級為 CRITICAL）\n"
+        "- 監控頻率建議\n\n"
+        "### 四、行動方案（Action Items）\n"
+        "以表格呈現：| 項次 | 行動項目 | 負責單位 | 優先順序 | 預計完成時間 |\n\n"
+        "### 五、風險評估\n"
+        "- 短期風險（24hr內）\n"
+        "- 中期風險（本週內）\n"
+        "- 建議預防措施\n\n"
+        "請用繁體中文回答，專業且簡潔。"
     )
 
     try:
@@ -45,8 +70,8 @@ def analyze_messages(critical: list[str], warning: list[str], others: list[str] 
         resp = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=1000,
+            temperature=0.2,
+            max_tokens=2000,
         )
         result = resp.choices[0].message.content or ""
         tokens = resp.usage.total_tokens if resp.usage else 0
