@@ -16,8 +16,8 @@ def _get_client() -> OpenAI:
     return _client
 
 
-def analyze_messages(critical: list[str], warning: list[str], others: list[str] = None) -> str:
-    if not critical and not warning and not others:
+def analyze_messages(critical: list[str], warning: list[str], report: list[str] = None, others: list[str] = None) -> str:
+    if not critical and not warning and not report and not others:
         return "今日無需分析之訊息"
 
     parts = []
@@ -29,6 +29,10 @@ def analyze_messages(critical: list[str], warning: list[str], others: list[str] 
         parts.append("=== WARNING（警告事項）===")
         for i, m in enumerate(warning[-20:], 1):
             parts.append(f"  W{i}. {m}")
+    if report:
+        parts.append("=== REPORT（班報/回報）===")
+        for i, m in enumerate(report[-20:], 1):
+            parts.append(f"  R{i}. {m}")
     if others:
         parts.append("=== OTHERS（一般回報）===")
         for i, m in enumerate(others[-20:], 1):
@@ -42,7 +46,7 @@ def analyze_messages(critical: list[str], warning: list[str], others: list[str] 
         + "\n\n"
         "## 輸出格式（必須嚴格依循，不可偏離）\n\n"
         "### 一、摘要總覽\n"
-        "- 統計：CRITICAL X項、WARNING Y項、一般 Z項\n"
+        "- 統計：CRITICAL X項、WARNING Y項、REPORT Z項、一般 W項\n"
         "- 影響範圍：（設備/製程/人員/物料/環境）\n"
         "- 產線狀態：（正常/輕微受影響/嚴重受影響/停線）\n\n"
         "### 二、CRITICAL 重大異常分析\n"
@@ -56,11 +60,15 @@ def analyze_messages(critical: list[str], warning: list[str], others: list[str] 
         "1. **異常現象**：<描述>\n"
         "   - 預防性建議：<避免升級為 CRITICAL 的建議>\n"
         "   - 監控頻率建議：<具體監控時間間隔>\n\n"
-        "### 四、行動方案（Action Items）\n"
+        "### 四、REPORT 班報回報摘要\n"
+        "總結 REPORT 訊息中的重要資訊：\n"
+        "- 產能/良率/出貨狀況\n"
+        "- 人員/物料異動\n\n"
+        "### 五、行動方案（Action Items）\n"
         "| 項次 | 行動項目 | 負責單位 | 優先順序 | 預計完成時間 |\n"
         "| --- | --- | --- | --- | --- |\n"
         "| 1 | <行動項目> | <負責單位> | P1/P2/P3 | <時間> |\n\n"
-        "### 五、風險評估\n"
+        "### 六、風險評估\n"
         "- 短期風險（24hr內）：<具體風險>\n"
         "- 中期風險（本週內）：<具體風險>\n"
         "- 建議預防措施：<具體措施>\n\n"

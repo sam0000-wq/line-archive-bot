@@ -16,8 +16,8 @@ from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.webhooks import MessageEvent, TextMessageContent, JoinEvent
 from archiver import (
     archive_message, get_sheet_rows, clear_archive, write_llm_analysis,
-    SHEET_CRITICAL, SHEET_WARNING, SHEET_OTHERS, SHEET_LLM,
-    _get_sheet_name, get_user_display_name, split_message,
+    SHEET_CRITICAL, SHEET_WARNING, SHEET_REPORT, SHEET_OTHERS, SHEET_LLM,
+    _get_sheet_name, get_user_display_name, split_message, PREFIX_SHEETS,
 )
 from config import Config
 from mailer import send_report
@@ -101,11 +101,13 @@ def trigger_instant_report(today: str, trigger_type: str, count: int) -> bool:
     try:
         critical = get_sheet_rows(local_path, SHEET_CRITICAL)
         warning = get_sheet_rows(local_path, SHEET_WARNING)
+        report = get_sheet_rows(local_path, SHEET_REPORT)
         others = get_sheet_rows(local_path, SHEET_OTHERS)
         critical_texts = [f"{r[2]}，{r[3]}" for r in critical]
         warning_texts = [f"{r[2]}，{r[3]}" for r in warning]
+        report_texts = [f"{r[2]}，{r[3]}" for r in report]
         others_texts = [r[2] for r in others]
-        analysis = analyze_messages(critical_texts, warning_texts, others_texts)
+        analysis = analyze_messages(critical_texts, warning_texts, report_texts, others_texts)
         write_llm_analysis(local_path, analysis)
         logger.info("LLM analysis done before instant report")
     except Exception:
@@ -167,11 +169,13 @@ def scheduled_report_job() -> None:
     try:
         critical = get_sheet_rows(local_path, SHEET_CRITICAL)
         warning = get_sheet_rows(local_path, SHEET_WARNING)
+        report = get_sheet_rows(local_path, SHEET_REPORT)
         others = get_sheet_rows(local_path, SHEET_OTHERS)
         critical_texts = [f"{r[2]}，{r[3]}" for r in critical]
         warning_texts = [f"{r[2]}，{r[3]}" for r in warning]
+        report_texts = [f"{r[2]}，{r[3]}" for r in report]
         others_texts = [r[2] for r in others]
-        analysis = analyze_messages(critical_texts, warning_texts, others_texts)
+        analysis = analyze_messages(critical_texts, warning_texts, report_texts, others_texts)
         write_llm_analysis(local_path, analysis)
         logger.info("LLM analysis done before daily report")
     except Exception:
@@ -301,18 +305,21 @@ def debug_xlsx():
     local_path = Config.ARCHIVE_DIR / f"line_archive_{today}.xlsx"
     if not local_path.exists():
         return jsonify({"error": f"No xlsx for {today}"}), 404
-    from archiver import get_sheet_rows, SHEET_CRITICAL, SHEET_WARNING, SHEET_OTHERS
+    from archiver import get_sheet_rows, SHEET_CRITICAL, SHEET_WARNING, SHEET_REPORT, SHEET_OTHERS
     critical = get_sheet_rows(local_path, SHEET_CRITICAL)
     warning = get_sheet_rows(local_path, SHEET_WARNING)
+    report = get_sheet_rows(local_path, SHEET_REPORT)
     others = get_sheet_rows(local_path, SHEET_OTHERS)
     return jsonify({
         "date": today,
         "file": str(local_path),
         "critical_count": len(critical),
         "warning_count": len(warning),
+        "report_count": len(report),
         "others_count": len(others),
         "critical_rows": critical,
         "warning_rows": warning,
+        "report_rows": report,
         "others_rows": others[:5],
         "critical_count_trigger": monitor["critical_count"],
     })
@@ -329,14 +336,15 @@ def process_archive():
 
         critical = get_sheet_rows(local_path, SHEET_CRITICAL)
         warning = get_sheet_rows(local_path, SHEET_WARNING)
+        report = get_sheet_rows(local_path, SHEET_REPORT)
         others = get_sheet_rows(local_path, SHEET_OTHERS)
 
         all_rows = {}
-        for sheet, rows in [(SHEET_CRITICAL, critical), (SHEET_WARNING, warning), (SHEET_OTHERS, others)]:
+        for sheet, rows in [(SHEET_CRITICAL, critical), (SHEET_WARNING, warning), (SHEET_REPORT, report), (SHEET_OTHERS, others)]:
             for r in rows:
                 ts = r[0]
                 name = r[1] if len(r) > 1 else ""
-                if sheet in (SHEET_CRITICAL, SHEET_WARNING):
+                if sheet in PREFIX_SHEETS:
                     if len(r) >= 4:
                         prefix, content = r[2], r[3]
                     elif len(r) >= 3:
@@ -348,7 +356,7 @@ def process_archive():
                 else:
                     raw_msg = r[2] if len(r) >= 3 else ""
                     real_sheet = _get_sheet_name(raw_msg)
-                    if real_sheet in (SHEET_CRITICAL, SHEET_WARNING):
+                    if real_sheet in PREFIX_SHEETS:
                         prefix, content = split_message(raw_msg)
                         key = (ts, prefix, content)
                         all_rows[key] = [ts, name, prefix, content, real_sheet]
@@ -367,11 +375,11 @@ def process_archive():
         cols5 = ["timestamp", "sender_name", "prefix", "message"]
         cols4 = ["timestamp", "sender_name", "message"]
         cols_llm = ["timestamp", "analysis"]
-        sheets_data = {SHEET_CRITICAL: [], SHEET_WARNING: [], SHEET_OTHERS: []}
+        sheets_data = {SHEET_CRITICAL: [], SHEET_WARNING: [], SHEET_REPORT: [], SHEET_OTHERS: []}
         for r in sorted_rows:
             sheet = r[-1]
             sheets_data[sheet].append(r)
-        for sname in (SHEET_CRITICAL, SHEET_WARNING):
+        for sname in (SHEET_CRITICAL, SHEET_WARNING, SHEET_REPORT):
             ws = wb.create_sheet(title=sname)
             ws.append(cols5)
             for ci in range(1, 5):
@@ -390,14 +398,15 @@ def process_archive():
             ws_llm.cell(row=1, column=ci).font = bold
 
         wb.save(str(local_path))
-        logger.info("Dedup saved: %d critical, %d warning, %d others (%d unique)",
+        logger.info("Dedup saved: %d critical, %d warning, %d report, %d others (%d unique)",
                     len(sheets_data[SHEET_CRITICAL]), len(sheets_data[SHEET_WARNING]),
-                    len(sheets_data[SHEET_OTHERS]), len(sorted_rows))
+                    len(sheets_data[SHEET_REPORT]), len(sheets_data[SHEET_OTHERS]), len(sorted_rows))
 
         critical_texts = [f"{r[2]}，{r[3]}" for r in sheets_data[SHEET_CRITICAL]]
         warning_texts = [f"{r[2]}，{r[3]}" for r in sheets_data[SHEET_WARNING]]
+        report_texts = [f"{r[2]}，{r[3]}" for r in sheets_data[SHEET_REPORT]]
         others_texts = [r[2] for r in sheets_data[SHEET_OTHERS]]
-        analysis = analyze_messages(critical_texts, warning_texts, others_texts)
+        analysis = analyze_messages(critical_texts, warning_texts, report_texts, others_texts)
 
         write_llm_analysis(local_path, analysis)
         push_xlsx(local_path, today, force=True)

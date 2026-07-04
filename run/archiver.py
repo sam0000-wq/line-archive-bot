@@ -16,8 +16,10 @@ OTHERS_COLUMNS = ["timestamp", "sender_name", "message"]
 LLM_COLUMNS = ["timestamp", "analysis"]
 SHEET_CRITICAL = "critical"
 SHEET_WARNING = "warning"
+SHEET_REPORT = "report"
 SHEET_OTHERS = "others"
 SHEET_LLM = "LLM"
+PREFIX_SHEETS = (SHEET_CRITICAL, SHEET_WARNING, SHEET_REPORT)
 
 _profile_cache: dict[str, str] = {}
 DELIMITERS = (",", "，")
@@ -37,6 +39,8 @@ def _get_sheet_name(prefix: str) -> str:
         return SHEET_CRITICAL
     elif cleaned.startswith("warning"):
         return SHEET_WARNING
+    elif cleaned.startswith("report"):
+        return SHEET_REPORT
     return SHEET_OTHERS
 
 
@@ -108,7 +112,7 @@ def _ensure_workbook(path: Path) -> Workbook:
     default_ws = wb.active
     wb.remove(default_ws)
     bold = Font(bold=True)
-    for sheet_name, cols in [(SHEET_CRITICAL, CRITICAL_COLUMNS), (SHEET_WARNING, CRITICAL_COLUMNS), (SHEET_OTHERS, OTHERS_COLUMNS)]:
+    for sheet_name, cols in [(SHEET_CRITICAL, CRITICAL_COLUMNS), (SHEET_WARNING, CRITICAL_COLUMNS), (SHEET_REPORT, CRITICAL_COLUMNS), (SHEET_OTHERS, OTHERS_COLUMNS)]:
         ws = wb.create_sheet(title=sheet_name)
         ws.append(cols)
         for col_idx in range(1, len(cols) + 1):
@@ -146,7 +150,7 @@ def archive_message(timestamp: str, sender_name: str, message: str) -> str:
     try:
         wb = _ensure_workbook(path)
         ws = wb[sheet_name]
-        if sheet_name in (SHEET_CRITICAL, SHEET_WARNING):
+        if sheet_name in PREFIX_SHEETS:
             prefix, content = split_message(message)
             ws.append([timestamp, sender_name, prefix, content])
         else:
@@ -187,7 +191,7 @@ def clear_archive(date_str: Optional[str] = None) -> bool:
         default_ws = wb.active
         wb.remove(default_ws)
         bold = Font(bold=True)
-        for sheet_name, cols in [(SHEET_CRITICAL, CRITICAL_COLUMNS), (SHEET_WARNING, CRITICAL_COLUMNS), (SHEET_OTHERS, OTHERS_COLUMNS)]:
+        for sheet_name, cols in [(SHEET_CRITICAL, CRITICAL_COLUMNS), (SHEET_WARNING, CRITICAL_COLUMNS), (SHEET_REPORT, CRITICAL_COLUMNS), (SHEET_OTHERS, OTHERS_COLUMNS)]:
             ws = wb.create_sheet(title=sheet_name)
             ws.append(cols)
             for col_idx in range(1, len(cols) + 1):
