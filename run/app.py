@@ -496,6 +496,15 @@ def handle_text_message(event: MessageEvent) -> None:
         logger.exception("Failed to archive message")
 
 
+def keep_alive():
+    import requests
+    try:
+        requests.get(f"{Config.BASE_URL}/health", timeout=10)
+        logger.debug("Keep-alive ping sent")
+    except Exception:
+        logger.debug("Keep-alive ping failed (expected on first boot)")
+
+
 def init_scheduler() -> None:
     scheduler.add_job(
         func=scheduled_report_job,
@@ -506,8 +515,15 @@ def init_scheduler() -> None:
         id="daily_report",
         replace_existing=True,
     )
+    scheduler.add_job(
+        func=keep_alive,
+        trigger="interval",
+        minutes=10,
+        id="keep_alive",
+        replace_existing=True,
+    )
     scheduler.start()
-    logger.info("Scheduler started: daily report at 20:00 Asia/Taipei")
+    logger.info("Scheduler started: daily report at 20:00 + keep-alive every 10min")
 
 
 def create_app() -> Flask:
