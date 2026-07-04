@@ -129,8 +129,7 @@ class ArchiveTests(TestRunner):
         from archiver import _get_sheet_name
         assert _get_sheet_name("hello world") == "others"
         assert _get_sheet_name("") == "others"
-        assert _get_sheet_name("critical") == "others"
-        assert _get_sheet_name("warning") == "others"
+        assert _get_sheet_name("report, daily update") == "report"
 
     @test_decorator("XLSX creation and archiving")
     def test_archive_xlsx(self, result: TestResult) -> None:
@@ -143,7 +142,7 @@ class ArchiveTests(TestRunner):
         Config.ARCHIVE_DIR = Path(tempfile.mkdtemp())
         Config.ensure_dirs()
         try:
-            sheet = archive_message(timestamp="2025-07-01 12:00:00", sender_name="TestUser", sender_user_id="Utest123", message="critical: system error occurred")
+            sheet = archive_message(timestamp="2025-07-01 12:00:00", sender_name="TestUser", message="critical, system error occurred")
             assert sheet == "critical", f"Expected critical, got {sheet}"
             files = list(Config.ARCHIVE_DIR.glob("*.xlsx"))
             assert len(files) == 1, f"Expected 1 xlsx, found {len(files)}"
@@ -153,8 +152,8 @@ class ArchiveTests(TestRunner):
             assert "others" in wb.sheetnames
             ws = wb["critical"]
             assert ws.max_row == 2, f"Expected 2 rows, got {ws.max_row}"
-            assert ws.cell(2, 4).value == "critical: system error occurred"
-            archive_message(timestamp="2025-07-01 13:00:00", sender_name="User2", sender_user_id="Utest456", message="warning: check this")
+            assert ws.cell(2, 4).value == "system error occurred"
+            archive_message(timestamp="2025-07-01 13:00:00", sender_name="User2", message="warning, check this")
             wb = load_workbook(str(files[0]))
             ws_warn = wb["warning"]
             assert ws_warn.max_row == 2
@@ -232,12 +231,12 @@ class IntegrationTests(TestRunner):
         Config.ensure_dirs()
         try:
             messages = [
-                ("2025-07-01 10:00:00", "Alice", "Ualice", "critical: database connection lost"),
-                ("2025-07-01 10:01:00", "Bob", "Ubob", "warning: high memory usage"),
-                ("2025-07-01 10:02:00", "Charlie", "Ucharlie", "hello everyone"),
+                ("2025-07-01 10:00:00", "Alice", "critical, database connection lost"),
+                ("2025-07-01 10:01:00", "Bob", "warning, high memory usage"),
+                ("2025-07-01 10:02:00", "Charlie", "hello everyone"),
             ]
-            for ts, name, uid, text in messages:
-                sheet = archive_message(ts, name, uid, text)
+            for ts, name, text in messages:
+                sheet = archive_message(ts, name, text)
                 assert sheet in ("critical", "warning", "others")
             path = _daily_path()
             assert path.exists()
