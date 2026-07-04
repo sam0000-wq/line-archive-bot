@@ -11,7 +11,8 @@ from openpyxl.styles import Font
 from config import Config
 
 logger = logging.getLogger(__name__)
-COLUMNS = ["timestamp", "sender_name", "sender_user_id", "prefix", "message"]
+CRITICAL_COLUMNS = ["timestamp", "sender_name", "sender_user_id", "prefix", "message"]
+OTHERS_COLUMNS = ["timestamp", "sender_name", "sender_user_id", "message"]
 SHEET_CRITICAL = "critical"
 SHEET_WARNING = "warning"
 SHEET_OTHERS = "others"
@@ -78,25 +79,31 @@ def _ensure_workbook(path: Path) -> Workbook:
             if ws.max_row >= 1:
                 headers = [ws.cell(row=1, column=c).value for c in range(1, ws.max_column + 1)]
                 if headers == ["timestamp", "sender_name", "sender_user_id", "message"]:
-                    ws.cell(row=1, column=4).value = "prefix"
-                    ws.cell(row=1, column=5).value = "message"
-                    for row_idx in range(2, ws.max_row + 1):
-                        old_msg = ws.cell(row=row_idx, column=4).value or ""
-                        prefix, content = split_message(str(old_msg))
-                        ws.cell(row=row_idx, column=4).value = prefix
-                        ws.cell(row=row_idx, column=5).value = content
-                    logger.info("Migrated sheet [%s] from 4-col to 5-col", sn)
+                    cols = CRITICAL_COLUMNS if sn in (SHEET_CRITICAL, SHEET_WARNING) else OTHERS_COLUMNS
+                    if sn in (SHEET_CRITICAL, SHEET_WARNING):
+                        ws.cell(row=1, column=4).value = "prefix"
+                        ws.cell(row=1, column=5).value = "message"
+                        for row_idx in range(2, ws.max_row + 1):
+                            old_msg = ws.cell(row=row_idx, column=4).value or ""
+                            prefix, content = split_message(str(old_msg))
+                            ws.cell(row=row_idx, column=4).value = prefix
+                            ws.cell(row=row_idx, column=5).value = content
+                    logger.info("Migrated sheet [%s] from 4-col", sn)
         wb.save(str(path))
         return load_workbook(str(path))
     wb = Workbook()
     default_ws = wb.active
     wb.remove(default_ws)
     bold = Font(bold=True)
-    for sheet_name in (SHEET_CRITICAL, SHEET_WARNING, SHEET_OTHERS):
+    for sheet_name in (SHEET_CRITICAL, SHEET_WARNING):
         ws = wb.create_sheet(title=sheet_name)
-        ws.append(COLUMNS)
-        for col_idx in range(1, len(COLUMNS) + 1):
+        ws.append(CRITICAL_COLUMNS)
+        for col_idx in range(1, len(CRITICAL_COLUMNS) + 1):
             ws.cell(row=1, column=col_idx).font = bold
+    ws = wb.create_sheet(title=SHEET_OTHERS)
+    ws.append(OTHERS_COLUMNS)
+    for col_idx in range(1, len(OTHERS_COLUMNS) + 1):
+        ws.cell(row=1, column=col_idx).font = bold
     wb.save(str(path))
     return load_workbook(str(path))
 
@@ -121,15 +128,18 @@ def get_sheet_rows(path: Path, sheet_name: str) -> list[list[str]]:
 
 
 def archive_message(timestamp: str, sender_name: str, sender_user_id: str, message: str) -> str:
-    prefix, content = split_message(message)
-    sheet_name = _get_sheet_name(prefix) if prefix else SHEET_OTHERS
+    sheet_name = _get_sheet_name(message) if _get_sheet_name(message) != SHEET_OTHERS else SHEET_OTHERS
     path = _daily_path()
     try:
         wb = _ensure_workbook(path)
         ws = wb[sheet_name]
-        ws.append([timestamp, sender_name, sender_user_id, prefix, content])
+        if sheet_name in (SHEET_CRITICAL, SHEET_WARNING):
+            prefix, content = split_message(message)
+            ws.append([timestamp, sender_name, sender_user_id, prefix, content])
+        else:
+            ws.append([timestamp, sender_name, sender_user_id, message])
         wb.save(str(path))
-        logger.info("Archived to [%s] %s: [%s] %s", sheet_name, path.name, prefix, content[:60])
+        logger.info("Archived to [%s] %s", sheet_name, path.name)
         return sheet_name
     except Exception:
         logger.exception("Failed to archive message to %s", path)

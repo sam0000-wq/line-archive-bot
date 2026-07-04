@@ -245,19 +245,24 @@ def process_archive():
 
         from archiver import split_message
         all_rows = {}
-        for rows in (critical, warning, others):
+        for sheet, rows in [(SHEET_CRITICAL, critical), (SHEET_WARNING, warning), (SHEET_OTHERS, others)]:
             for r in rows:
-                if len(r) >= 5:
-                    prefix, content = r[3], r[4]
-                elif len(r) >= 4:
-                    prefix, content = split_message(r[3])
-                else:
-                    continue
                 ts = r[0]
                 name = r[1] if len(r) > 1 else ""
                 uid = r[2] if len(r) > 2 else ""
-                key = (ts, prefix, content)
-                all_rows[key] = [ts, name, uid, prefix, content]
+                if sheet in (SHEET_CRITICAL, SHEET_WARNING):
+                    if len(r) >= 5:
+                        prefix, content = r[3], r[4]
+                    elif len(r) >= 4:
+                        prefix, content = split_message(r[3])
+                    else:
+                        continue
+                    key = (ts, prefix, content)
+                    all_rows[key] = [ts, name, uid, prefix, content, sheet]
+                else:
+                    content = r[3] if len(r) >= 4 else ""
+                    key = (ts, content)
+                    all_rows[key] = [ts, name, uid, content, sheet]
 
         sorted_rows = sorted(all_rows.values(), key=lambda r: r[0])
 
@@ -267,18 +272,25 @@ def process_archive():
         default_ws = wb.active
         wb.remove(default_ws)
         bold = Font(bold=True)
-        cols = ["timestamp", "sender_name", "sender_user_id", "prefix", "message"]
+        cols5 = ["timestamp", "sender_name", "sender_user_id", "prefix", "message"]
+        cols4 = ["timestamp", "sender_name", "sender_user_id", "message"]
         sheets_data = {SHEET_CRITICAL: [], SHEET_WARNING: [], SHEET_OTHERS: []}
         for r in sorted_rows:
-            sname = _get_sheet_name(r[3]) if r[3] else SHEET_OTHERS
-            sheets_data[sname].append(r)
-        for sname in (SHEET_CRITICAL, SHEET_WARNING, SHEET_OTHERS):
+            sheet = r[-1]
+            sheets_data[sheet].append(r)
+        for sname in (SHEET_CRITICAL, SHEET_WARNING):
             ws = wb.create_sheet(title=sname)
-            ws.append(cols)
+            ws.append(cols5)
             for ci in range(1, 6):
                 ws.cell(row=1, column=ci).font = bold
             for r in sheets_data[sname]:
-                ws.append(r)
+                ws.append(r[:5])
+        ws = wb.create_sheet(title=SHEET_OTHERS)
+        ws.append(cols4)
+        for ci in range(1, 5):
+            ws.cell(row=1, column=ci).font = bold
+        for r in sheets_data[SHEET_OTHERS]:
+            ws.append(r[:4])
 
         wb.save(str(local_path))
         logger.info("Dedup saved: %d critical, %d warning, %d others (%d unique)",
@@ -295,8 +307,8 @@ def process_archive():
             "status": "ok",
             "date": today,
             "unique_messages": len(sorted_rows),
-            "critical": len(critical_texts),
-            "warning": len(warning_texts),
+            "critical": len(sheets_data[SHEET_CRITICAL]),
+            "warning": len(sheets_data[SHEET_WARNING]),
             "others": len(sheets_data[SHEET_OTHERS]),
             "analysis": analysis,
         })
