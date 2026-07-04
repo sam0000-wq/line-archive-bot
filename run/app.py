@@ -232,6 +232,9 @@ def process_archive():
 
         pull_xlsx(today, local_path)
 
+        from archiver import _ensure_workbook
+        _ensure_workbook(local_path)
+
         critical = get_sheet_rows(local_path, SHEET_CRITICAL)
         warning = get_sheet_rows(local_path, SHEET_WARNING)
         others = get_sheet_rows(local_path, SHEET_OTHERS)
