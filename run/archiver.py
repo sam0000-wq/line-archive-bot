@@ -41,18 +41,23 @@ def get_user_display_name(user_id: str) -> str:
     if user_id in _profile_cache:
         return _profile_cache[user_id]
     if not Config.LINE_CHANNEL_ACCESS_TOKEN:
+        logger.warning("No LINE_CHANNEL_ACCESS_TOKEN, using user_id")
         _profile_cache[user_id] = user_id
         return user_id
     try:
         url = f"https://api.line.me/v2/bot/profile/{user_id}"
         headers = {"Authorization": f"Bearer {Config.LINE_CHANNEL_ACCESS_TOKEN}"}
         resp = http_requests.get(url, headers=headers, timeout=5)
+        logger.info("LINE profile API %s -> HTTP %d", user_id, resp.status_code)
         if resp.status_code == 200:
             display_name = resp.json().get("displayName", user_id)
             _profile_cache[user_id] = display_name
+            logger.info("Display name: %s -> %s", user_id, display_name)
             return display_name
-    except Exception:
-        pass
+        else:
+            logger.warning("LINE profile API returned %d: %s", resp.status_code, resp.text[:200])
+    except Exception as e:
+        logger.exception("Failed to fetch LINE profile for %s: %s", user_id, e)
     _profile_cache[user_id] = user_id
     return user_id
 
