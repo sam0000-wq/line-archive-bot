@@ -9,8 +9,8 @@ from typing import Optional
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, Alignment
 from openpyxl.chart import PieChart, BarChart, Reference
+from openpyxl.chart.label import DataLabelList
 from openpyxl.utils import get_column_letter
-import re
 import re
 from config import Config
 
@@ -384,6 +384,9 @@ def create_chart_sheet(path: Path) -> None:
         cats = Reference(ws, min_col=1, min_row=3, max_row=6)
         pie.add_data(data, titles_from_data=True)
         pie.set_categories(cats)
+        pie.dataLabels = DataLabelList()
+        pie.dataLabels.showVal = True
+        pie.dataLabels.showPercent = True
         pie.width = 16
         pie.height = 10
         ws.add_chart(pie, "A8")
@@ -398,6 +401,8 @@ def create_chart_sheet(path: Path) -> None:
         cats2 = Reference(ws, min_col=4, min_row=3, max_row=station_row_end)
         bar.add_data(data2, titles_from_data=True)
         bar.set_categories(cats2)
+        bar.dataLabels = DataLabelList()
+        bar.dataLabels.showVal = True
         bar.width = 16
         bar.height = 10
         ws.add_chart(bar, "J8")
@@ -410,6 +415,9 @@ def create_chart_sheet(path: Path) -> None:
             cats3 = Reference(ws, min_col=7, min_row=3, max_row=5)
             pie2.add_data(data3, titles_from_data=True)
             pie2.set_categories(cats3)
+            pie2.dataLabels = DataLabelList()
+            pie2.dataLabels.showVal = True
+            pie2.dataLabels.showPercent = True
             pie2.width = 16
             pie2.height = 10
             ws.add_chart(pie2, "A24")
@@ -425,6 +433,8 @@ def create_chart_sheet(path: Path) -> None:
             cats4 = Reference(ws, min_col=10, min_row=3, max_row=unit_row_end)
             bar2.add_data(data4, titles_from_data=True)
             bar2.set_categories(cats4)
+            bar2.dataLabels = DataLabelList()
+            bar2.dataLabels.showVal = True
             bar2.width = 16
             bar2.height = 10
             ws.add_chart(bar2, "J24")
