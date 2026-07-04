@@ -31,3 +31,16 @@ run/test_report.html
 run/test_report.json
 run/deploy_report.html
 run/server_test.log
+
+# Secret-containing temp files
+enc_pat.py
+fix_wf.py
+fix_wf2.py
+fix_wf3.py
+
+# Test xlsx files
+*.xlsx
+!run/archive/*.xlsx
+
+# Temp text files
+*.txt
