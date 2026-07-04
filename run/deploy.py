@@ -52,10 +52,10 @@ def step_render_deploy() -> bool:
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     url = f"https://api.render.com/v1/services/{service_id}/deploys"
     resp = requests.post(url, headers=headers, json={}, timeout=30)
-    if resp.status_code not in (200, 201):
+    if resp.status_code not in (200, 201, 202):
         logger.error("Render API error: %d %s", resp.status_code, resp.text)
         return False
-    deploy_id = resp.json().get("id", "unknown")
+    deploy_id = resp.json().get("id") or resp.json()[0].get("deploy", {}).get("id", "unknown")
     logger.info("Render deploy triggered: %s", deploy_id)
 
     logger.info("Waiting for deploy to finish...")
