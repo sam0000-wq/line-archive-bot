@@ -11,11 +11,13 @@ from openpyxl.styles import Font
 from config import Config
 
 logger = logging.getLogger(__name__)
-CRITICAL_COLUMNS = ["timestamp", "sender_name", "sender_user_id", "prefix", "message"]
-OTHERS_COLUMNS = ["timestamp", "sender_name", "sender_user_id", "message"]
+CRITICAL_COLUMNS = ["timestamp", "sender_name", "prefix", "message"]
+OTHERS_COLUMNS = ["timestamp", "sender_name", "message"]
+LLM_COLUMNS = ["timestamp", "analysis"]
 SHEET_CRITICAL = "critical"
 SHEET_WARNING = "warning"
 SHEET_OTHERS = "others"
+SHEET_LLM = "LLM"
 
 _profile_cache: dict[str, str] = {}
 DELIMITERS = (",", "，")
@@ -75,35 +77,46 @@ def _ensure_workbook(path: Path) -> Workbook:
     if path.exists():
         wb = load_workbook(str(path))
         for sn in wb.sheetnames:
+            if sn == SHEET_LLM:
+                continue
             ws = wb[sn]
             if ws.max_row >= 1:
                 headers = [ws.cell(row=1, column=c).value for c in range(1, ws.max_column + 1)]
                 if headers == ["timestamp", "sender_name", "sender_user_id", "message"]:
-                    cols = CRITICAL_COLUMNS if sn in (SHEET_CRITICAL, SHEET_WARNING) else OTHERS_COLUMNS
+                    ws.cell(row=1, column=1).value = "timestamp"
+                    ws.cell(row=1, column=2).value = "sender_name"
+                    ws.delete_cols(3)
                     if sn in (SHEET_CRITICAL, SHEET_WARNING):
-                        ws.cell(row=1, column=4).value = "prefix"
-                        ws.cell(row=1, column=5).value = "message"
+                        ws.cell(row=1, column=3).value = "prefix"
+                        ws.cell(row=1, column=4).value = "message"
                         for row_idx in range(2, ws.max_row + 1):
-                            old_msg = ws.cell(row=row_idx, column=4).value or ""
+                            old_msg = ws.cell(row=row_idx, column=3).value or ""
                             prefix, content = split_message(str(old_msg))
-                            ws.cell(row=row_idx, column=4).value = prefix
-                            ws.cell(row=row_idx, column=5).value = content
-                    logger.info("Migrated sheet [%s] from 4-col", sn)
+                            ws.cell(row=row_idx, column=3).value = prefix
+                            ws.cell(row=row_idx, column=4).value = content
+                    logger.info("Migrated sheet [%s] (removed sender_user_id)", sn)
+        if SHEET_LLM not in wb.sheetnames:
+            ws = wb.create_sheet(title=SHEET_LLM)
+            ws.append(LLM_COLUMNS)
+            bold = Font(bold=True)
+            for ci in range(1, len(LLM_COLUMNS) + 1):
+                ws.cell(row=1, column=ci).font = bold
         wb.save(str(path))
         return load_workbook(str(path))
+
     wb = Workbook()
     default_ws = wb.active
     wb.remove(default_ws)
     bold = Font(bold=True)
-    for sheet_name in (SHEET_CRITICAL, SHEET_WARNING):
+    for sheet_name, cols in [(SHEET_CRITICAL, CRITICAL_COLUMNS), (SHEET_WARNING, CRITICAL_COLUMNS), (SHEET_OTHERS, OTHERS_COLUMNS)]:
         ws = wb.create_sheet(title=sheet_name)
-        ws.append(CRITICAL_COLUMNS)
-        for col_idx in range(1, len(CRITICAL_COLUMNS) + 1):
+        ws.append(cols)
+        for col_idx in range(1, len(cols) + 1):
             ws.cell(row=1, column=col_idx).font = bold
-    ws = wb.create_sheet(title=SHEET_OTHERS)
-    ws.append(OTHERS_COLUMNS)
-    for col_idx in range(1, len(OTHERS_COLUMNS) + 1):
-        ws.cell(row=1, column=col_idx).font = bold
+    ws_llm = wb.create_sheet(title=SHEET_LLM)
+    ws_llm.append(LLM_COLUMNS)
+    for col_idx in range(1, len(LLM_COLUMNS) + 1):
+        ws_llm.cell(row=1, column=col_idx).font = bold
     wb.save(str(path))
     return load_workbook(str(path))
 
@@ -127,17 +140,17 @@ def get_sheet_rows(path: Path, sheet_name: str) -> list[list[str]]:
         return []
 
 
-def archive_message(timestamp: str, sender_name: str, sender_user_id: str, message: str) -> str:
-    sheet_name = _get_sheet_name(message) if _get_sheet_name(message) != SHEET_OTHERS else SHEET_OTHERS
+def archive_message(timestamp: str, sender_name: str, message: str) -> str:
+    sheet_name = _get_sheet_name(message)
     path = _daily_path()
     try:
         wb = _ensure_workbook(path)
         ws = wb[sheet_name]
         if sheet_name in (SHEET_CRITICAL, SHEET_WARNING):
             prefix, content = split_message(message)
-            ws.append([timestamp, sender_name, sender_user_id, prefix, content])
+            ws.append([timestamp, sender_name, prefix, content])
         else:
-            ws.append([timestamp, sender_name, sender_user_id, message])
+            ws.append([timestamp, sender_name, message])
         wb.save(str(path))
         logger.info("Archived to [%s] %s", sheet_name, path.name)
         return sheet_name
@@ -146,12 +159,23 @@ def archive_message(timestamp: str, sender_name: str, sender_user_id: str, messa
         raise
 
 
-def get_archive_path(date_str: Optional[str] = None) -> Optional[Path]:
-    if date_str:
-        path = Config.ARCHIVE_DIR / f"line_archive_{date_str}.xlsx"
-    else:
-        path = _daily_path()
-    return path if path.exists() else None
+def write_llm_analysis(path: Path, analysis: str) -> None:
+    try:
+        wb = load_workbook(str(path))
+        if SHEET_LLM not in wb.sheetnames:
+            ws = wb.create_sheet(title=SHEET_LLM)
+            ws.append(LLM_COLUMNS)
+            bold = Font(bold=True)
+            for ci in range(1, len(LLM_COLUMNS) + 1):
+                ws.cell(row=1, column=ci).font = bold
+        else:
+            ws = wb[SHEET_LLM]
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ws.append([timestamp, analysis])
+        wb.save(str(path))
+        logger.info("LLM analysis written to %s", path.name)
+    except Exception:
+        logger.exception("Failed to write LLM analysis to %s", path)
 
 
 def clear_archive(date_str: Optional[str] = None) -> bool:
@@ -168,9 +192,21 @@ def clear_archive(date_str: Optional[str] = None) -> bool:
             ws.append(cols)
             for col_idx in range(1, len(cols) + 1):
                 ws.cell(row=1, column=col_idx).font = bold
+        ws_llm = wb.create_sheet(title=SHEET_LLM)
+        ws_llm.append(LLM_COLUMNS)
+        for col_idx in range(1, len(LLM_COLUMNS) + 1):
+            ws_llm.cell(row=1, column=col_idx).font = bold
         wb.save(str(path))
         logger.info("Cleared archive: %s", path.name)
         return True
     except Exception:
         logger.exception("Failed to clear archive %s", path)
         return False
+
+
+def get_archive_path(date_str: Optional[str] = None) -> Optional[Path]:
+    if date_str:
+        path = Config.ARCHIVE_DIR / f"line_archive_{date_str}.xlsx"
+    else:
+        path = _daily_path()
+    return path if path.exists() else None

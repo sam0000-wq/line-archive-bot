@@ -14,7 +14,11 @@ from linebot.v3.webhook import WebhookHandler
 from linebot.v3.messaging import MessagingApi, ApiClient, Configuration, TextMessage, PushMessageRequest
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.webhooks import MessageEvent, TextMessageContent, JoinEvent
-from archiver import archive_message, get_sheet_rows, SHEET_CRITICAL, SHEET_WARNING, SHEET_OTHERS, _get_sheet_name, get_user_display_name, clear_archive
+from archiver import (
+    archive_message, get_sheet_rows, clear_archive, write_llm_analysis,
+    SHEET_CRITICAL, SHEET_WARNING, SHEET_OTHERS, SHEET_LLM,
+    _get_sheet_name, get_user_display_name, split_message,
+)
 from config import Config
 from mailer import send_report
 from sync_repo import push_xlsx, pull_xlsx
@@ -71,8 +75,6 @@ def send_line_report(today: str) -> None:
 
 
 def trigger_instant_report(today: str, trigger_type: str, count: int) -> bool:
-    """觸發 GitHub Actions 即時報告 + 發送 LINE 即時通知"""
-    # 1. 發送 LINE 即時通知
     if Config.TARGET_GROUP_ID:
         msg = (
             f"🚨 即時觸發報告 ({trigger_type} 達 {count} 筆)\n"
@@ -93,7 +95,6 @@ def trigger_instant_report(today: str, trigger_type: str, count: int) -> bool:
         except Exception:
             logger.exception("Failed to send instant LINE notification")
 
-    # 2. 觸發 GitHub Actions workflow_dispatch
     if Config.GITHUB_TOKEN:
         import requests
         url = f"https://api.github.com/repos/sam0000-wq/line-archive-bot/actions/workflows/instant-report.yml/dispatches"
@@ -136,14 +137,14 @@ def serve_file(filename: str):
     from pathlib import Path as _Path
     safe_name = _Path(filename).name
     local_path = Config.ARCHIVE_DIR / safe_name
-    
+
     if not local_path.exists():
         date_str = safe_name.replace("line_archive_", "").replace(".xlsx", "")
         if pull_xlsx(date_str, local_path):
             logger.info("Pulled %s from GitHub for download", safe_name)
         else:
             abort(404, "File not found locally or on GitHub")
-    
+
     return send_file(str(local_path), as_attachment=True)
 
 
@@ -248,32 +249,30 @@ def process_archive():
         warning = get_sheet_rows(local_path, SHEET_WARNING)
         others = get_sheet_rows(local_path, SHEET_OTHERS)
 
-        from archiver import split_message, _get_sheet_name
         all_rows = {}
         for sheet, rows in [(SHEET_CRITICAL, critical), (SHEET_WARNING, warning), (SHEET_OTHERS, others)]:
             for r in rows:
                 ts = r[0]
                 name = r[1] if len(r) > 1 else ""
-                uid = r[2] if len(r) > 2 else ""
                 if sheet in (SHEET_CRITICAL, SHEET_WARNING):
-                    if len(r) >= 5:
-                        prefix, content = r[3], r[4]
-                    elif len(r) >= 4:
-                        prefix, content = split_message(r[3])
+                    if len(r) >= 4:
+                        prefix, content = r[2], r[3]
+                    elif len(r) >= 3:
+                        prefix, content = split_message(r[2])
                     else:
                         continue
                     key = (ts, prefix, content)
-                    all_rows[key] = [ts, name, uid, prefix, content, sheet]
+                    all_rows[key] = [ts, name, prefix, content, sheet]
                 else:
-                    raw_msg = r[3] if len(r) >= 4 else ""
+                    raw_msg = r[2] if len(r) >= 3 else ""
                     real_sheet = _get_sheet_name(raw_msg)
                     if real_sheet in (SHEET_CRITICAL, SHEET_WARNING):
                         prefix, content = split_message(raw_msg)
                         key = (ts, prefix, content)
-                        all_rows[key] = [ts, name, uid, prefix, content, real_sheet]
+                        all_rows[key] = [ts, name, prefix, content, real_sheet]
                     else:
                         key = (ts, raw_msg)
-                        all_rows[key] = [ts, name, uid, raw_msg, sheet]
+                        all_rows[key] = [ts, name, raw_msg, sheet]
 
         sorted_rows = sorted(all_rows.values(), key=lambda r: r[0])
 
@@ -283,8 +282,9 @@ def process_archive():
         default_ws = wb.active
         wb.remove(default_ws)
         bold = Font(bold=True)
-        cols5 = ["timestamp", "sender_name", "sender_user_id", "prefix", "message"]
-        cols4 = ["timestamp", "sender_name", "sender_user_id", "message"]
+        cols5 = ["timestamp", "sender_name", "prefix", "message"]
+        cols4 = ["timestamp", "sender_name", "message"]
+        cols_llm = ["timestamp", "analysis"]
         sheets_data = {SHEET_CRITICAL: [], SHEET_WARNING: [], SHEET_OTHERS: []}
         for r in sorted_rows:
             sheet = r[-1]
@@ -292,27 +292,33 @@ def process_archive():
         for sname in (SHEET_CRITICAL, SHEET_WARNING):
             ws = wb.create_sheet(title=sname)
             ws.append(cols5)
-            for ci in range(1, 6):
+            for ci in range(1, 5):
                 ws.cell(row=1, column=ci).font = bold
             for r in sheets_data[sname]:
-                ws.append(r[:5])
+                ws.append(r[:4])
         ws = wb.create_sheet(title=SHEET_OTHERS)
         ws.append(cols4)
-        for ci in range(1, 5):
+        for ci in range(1, 4):
             ws.cell(row=1, column=ci).font = bold
         for r in sheets_data[SHEET_OTHERS]:
-            ws.append(r[:4])
+            ws.append(r[:3])
+        ws_llm = wb.create_sheet(title=SHEET_LLM)
+        ws_llm.append(cols_llm)
+        for ci in range(1, 3):
+            ws_llm.cell(row=1, column=ci).font = bold
 
         wb.save(str(local_path))
         logger.info("Dedup saved: %d critical, %d warning, %d others (%d unique)",
                     len(sheets_data[SHEET_CRITICAL]), len(sheets_data[SHEET_WARNING]),
                     len(sheets_data[SHEET_OTHERS]), len(sorted_rows))
 
-        push_xlsx(local_path, today, force=True)
+        critical_texts = [f"{r[2]}，{r[3]}" for r in sheets_data[SHEET_CRITICAL]]
+        warning_texts = [f"{r[2]}，{r[3]}" for r in sheets_data[SHEET_WARNING]]
+        others_texts = [r[2] for r in sheets_data[SHEET_OTHERS]]
+        analysis = analyze_messages(critical_texts, warning_texts, others_texts)
 
-        critical_texts = [f"{r[3]}，{r[4]}" for r in sheets_data[SHEET_CRITICAL]]
-        warning_texts = [f"{r[3]}，{r[4]}" for r in sheets_data[SHEET_WARNING]]
-        analysis = analyze_messages(critical_texts, warning_texts)
+        write_llm_analysis(local_path, analysis)
+        push_xlsx(local_path, today, force=True)
 
         return jsonify({
             "status": "ok",
@@ -374,17 +380,15 @@ def handle_text_message(event: MessageEvent) -> None:
         sheet = archive_message(
             timestamp=timestamp,
             sender_name=display_name,
-            sender_user_id=event.source.user_id or "unknown",
             message=message.text,
         )
         monitor["total_messages_archived"] += 1
         monitor["last_message_time"] = datetime.now(TAIPEI_TZ).isoformat()
-        logger.info("Archived message from %s (%s) to sheet [%s]", display_name, event.source.user_id, sheet)
+        logger.info("Archived message from %s to sheet [%s]", display_name, sheet)
 
         today_str = datetime.now(TAIPEI_TZ).strftime("%Y%m%d")
         push_xlsx(Config.ARCHIVE_DIR / f"line_archive_{today_str}.xlsx", today_str)
 
-        # 檢查即時觸發條件 (critical + warning 合計)
         if sheet in (SHEET_CRITICAL, SHEET_WARNING):
             monitor["critical_count"] += 1
             if monitor["critical_count"] >= 3:
@@ -424,7 +428,3 @@ if __name__ == "__main__":
     port = Config.APP_PORT
     logger.info("Starting local server on 0.0.0.0:%d", port)
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
-
-
-
-

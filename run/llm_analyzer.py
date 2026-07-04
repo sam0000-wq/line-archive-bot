@@ -16,8 +16,8 @@ def _get_client() -> OpenAI:
     return _client
 
 
-def analyze_messages(critical: list[str], warning: list[str]) -> str:
-    if not critical and not warning:
+def analyze_messages(critical: list[str], warning: list[str], others: list[str] = None) -> str:
+    if not critical and not warning and not others:
         return "今日無需分析之訊息"
 
     parts = []
@@ -29,9 +29,13 @@ def analyze_messages(critical: list[str], warning: list[str]) -> str:
         parts.append("=== 警告訊息 (warning) ===")
         for m in warning[-20:]:
             parts.append(f"- {m}")
+    if others:
+        parts.append("=== 一般訊息 (others) ===")
+        for m in others[-20:]:
+            parts.append(f"- {m}")
 
     prompt = (
-        "你是一個 LINE 群組訊息分析助手。以下是今日收集到的重要與警告訊息，請整理出重點摘要。\n\n"
+        "你是一個 LINE 群組訊息分析助手。以下是今日收集到的訊息，請整理出重點摘要。\n\n"
         + "\n".join(parts)
         + "\n\n請用繁體中文提供：\n1. 重點摘要\n2. 需要採取行動的項目（若無則略過）\n3. 關注趨勢"
     )
