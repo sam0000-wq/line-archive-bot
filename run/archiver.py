@@ -67,6 +67,21 @@ def split_message(message: str) -> tuple[str, str]:
 
 def _ensure_workbook(path: Path) -> Workbook:
     if path.exists():
+        wb = load_workbook(str(path))
+        for sn in wb.sheetnames:
+            ws = wb[sn]
+            if ws.max_row >= 1:
+                headers = [ws.cell(row=1, column=c).value for c in range(1, ws.max_column + 1)]
+                if headers == ["timestamp", "sender_name", "sender_user_id", "message"]:
+                    ws.cell(row=1, column=4).value = "prefix"
+                    ws.cell(row=1, column=5).value = "message"
+                    for row_idx in range(2, ws.max_row + 1):
+                        old_msg = ws.cell(row=row_idx, column=4).value or ""
+                        prefix, content = split_message(str(old_msg))
+                        ws.cell(row=row_idx, column=4).value = prefix
+                        ws.cell(row=row_idx, column=5).value = content
+                    logger.info("Migrated sheet [%s] from 4-col to 5-col", sn)
+        wb.save(str(path))
         return load_workbook(str(path))
     wb = Workbook()
     default_ws = wb.active
