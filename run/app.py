@@ -243,7 +243,7 @@ def process_archive():
         warning = get_sheet_rows(local_path, SHEET_WARNING)
         others = get_sheet_rows(local_path, SHEET_OTHERS)
 
-        from archiver import split_message
+        from archiver import split_message, _get_sheet_name
         all_rows = {}
         for sheet, rows in [(SHEET_CRITICAL, critical), (SHEET_WARNING, warning), (SHEET_OTHERS, others)]:
             for r in rows:
@@ -260,9 +260,15 @@ def process_archive():
                     key = (ts, prefix, content)
                     all_rows[key] = [ts, name, uid, prefix, content, sheet]
                 else:
-                    content = r[3] if len(r) >= 4 else ""
-                    key = (ts, content)
-                    all_rows[key] = [ts, name, uid, content, sheet]
+                    raw_msg = r[3] if len(r) >= 4 else ""
+                    real_sheet = _get_sheet_name(raw_msg)
+                    if real_sheet in (SHEET_CRITICAL, SHEET_WARNING):
+                        prefix, content = split_message(raw_msg)
+                        key = (ts, prefix, content)
+                        all_rows[key] = [ts, name, uid, prefix, content, real_sheet]
+                    else:
+                        key = (ts, raw_msg)
+                        all_rows[key] = [ts, name, uid, raw_msg, sheet]
 
         sorted_rows = sorted(all_rows.values(), key=lambda r: r[0])
 
