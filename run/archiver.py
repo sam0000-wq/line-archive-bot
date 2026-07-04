@@ -31,9 +31,9 @@ def _daily_path(date: Optional[datetime] = None) -> Path:
 
 def _get_sheet_name(prefix: str) -> str:
     cleaned = prefix.lower().strip()
-    if cleaned == "critical":
+    if cleaned.startswith("critical"):
         return SHEET_CRITICAL
-    elif cleaned == "warning":
+    elif cleaned.startswith("warning"):
         return SHEET_WARNING
     return SHEET_OTHERS
 
