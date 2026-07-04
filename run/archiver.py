@@ -11,6 +11,7 @@ from openpyxl.styles import Font, Alignment
 from openpyxl.chart import PieChart, BarChart, Reference
 from openpyxl.utils import get_column_letter
 import re
+import re
 from config import Config
 
 logger = logging.getLogger(__name__)
@@ -251,6 +252,43 @@ def _extract_station(message: str) -> str:
     return "其他"
 
 
+def _parse_llm_analysis(llm_rows: list[list[str]]) -> dict:
+    """Parse LLM analysis text to extract priority and unit counts."""
+    priority_counts = {"P1": 0, "P2": 0, "P3": 0}
+    unit_counts: dict[str, int] = {}
+    units_pattern = re.compile(r"(組裝站|測試站|包裝站|物料站|組裝|測試|包裝|物料)")
+
+    for row in llm_rows:
+        text = row[1] if len(row) >= 2 else ""
+
+        p1 = len(re.findall(r"P1", text))
+        p2 = len(re.findall(r"P2", text))
+        p3 = len(re.findall(r"P3", text))
+        priority_counts["P1"] += p1
+        priority_counts["P2"] += p2
+        priority_counts["P3"] += p3
+
+        action_section = False
+        for line in text.split("\n"):
+            if "行動方案" in line:
+                action_section = True
+            elif re.match(r"【.+】", line):
+                action_section = False
+            if action_section:
+                matches = units_pattern.findall(line)
+                for m in matches:
+                    unit = m if m.endswith("站") else m + "站"
+                    unit_counts[unit] = unit_counts.get(unit, 0) + 1
+
+    if sum(priority_counts.values()) == 0:
+        for line in (row[1] for row in llm_rows if len(row) >= 2):
+            priority_counts["P1"] += len(re.findall(r"P1", line))
+            priority_counts["P2"] += len(re.findall(r"P2", line))
+            priority_counts["P3"] += len(re.findall(r"P3", line))
+
+    return {"priority": priority_counts, "units": unit_counts}
+
+
 def create_chart_sheet(path: Path) -> None:
     try:
         wb = load_workbook(str(path))
@@ -259,6 +297,9 @@ def create_chart_sheet(path: Path) -> None:
         warning = get_sheet_rows(path, SHEET_WARNING)
         report = get_sheet_rows(path, SHEET_REPORT)
         others = get_sheet_rows(path, SHEET_OTHERS)
+        llm_rows = get_sheet_rows(path, SHEET_LLM) if SHEET_LLM in wb.sheetnames else []
+
+        llm_data = _parse_llm_analysis(llm_rows) if llm_rows else {"priority": {"P1": 0, "P2": 0, "P3": 0}, "units": {}}
 
         type_counts = {
             "CRITICAL": len(critical),
@@ -303,10 +344,38 @@ def create_chart_sheet(path: Path) -> None:
             ws.cell(row=row, column=5, value=count)
             row += 1
 
+        ws["G1"] = "LLM 分析：優先順序分布"
+        ws["G1"].font = bold
+        ws["G2"] = "優先順序"
+        ws["H2"] = "數量"
+        ws["G2"].font = Font(bold=True)
+        ws["H2"].font = Font(bold=True)
+        row = 3
+        for p_label, p_count in llm_data["priority"].items():
+            ws.cell(row=row, column=7, value=p_label)
+            ws.cell(row=row, column=8, value=p_count)
+            row += 1
+
+        ws["J1"] = "LLM 分析：負責單位分布"
+        ws["J1"].font = bold
+        ws["J2"] = "單位"
+        ws["K2"] = "數量"
+        ws["J2"].font = Font(bold=True)
+        ws["K2"].font = Font(bold=True)
+        row = 3
+        for unit, count in sorted(llm_data["units"].items(), key=lambda x: -x[1]):
+            ws.cell(row=row, column=10, value=unit)
+            ws.cell(row=row, column=11, value=count)
+            row += 1
+
         ws.column_dimensions["A"].width = 15
         ws.column_dimensions["B"].width = 10
         ws.column_dimensions["D"].width = 15
         ws.column_dimensions["E"].width = 10
+        ws.column_dimensions["G"].width = 15
+        ws.column_dimensions["H"].width = 10
+        ws.column_dimensions["J"].width = 15
+        ws.column_dimensions["K"].width = 10
 
         pie = PieChart()
         pie.title = "訊息分類占比"
@@ -332,6 +401,33 @@ def create_chart_sheet(path: Path) -> None:
         bar.width = 16
         bar.height = 10
         ws.add_chart(bar, "J8")
+
+        if sum(llm_data["priority"].values()) > 0:
+            pie2 = PieChart()
+            pie2.title = "優先順序分布 (P1/P2/P3)"
+            pie2.style = 10
+            data3 = Reference(ws, min_col=8, min_row=2, max_row=5)
+            cats3 = Reference(ws, min_col=7, min_row=3, max_row=5)
+            pie2.add_data(data3, titles_from_data=True)
+            pie2.set_categories(cats3)
+            pie2.width = 16
+            pie2.height = 10
+            ws.add_chart(pie2, "A24")
+
+        if llm_data["units"]:
+            bar2 = BarChart()
+            bar2.title = "負責單位分布 (LLM 分析)"
+            bar2.style = 10
+            bar2.type = "col"
+            bar2.y_axis.title = "行動項數"
+            unit_row_end = 2 + len(llm_data["units"])
+            data4 = Reference(ws, min_col=11, min_row=2, max_row=unit_row_end)
+            cats4 = Reference(ws, min_col=10, min_row=3, max_row=unit_row_end)
+            bar2.add_data(data4, titles_from_data=True)
+            bar2.set_categories(cats4)
+            bar2.width = 16
+            bar2.height = 10
+            ws.add_chart(bar2, "J24")
 
         wb.save(str(path))
         logger.info("Chart sheet created in %s", path.name)
