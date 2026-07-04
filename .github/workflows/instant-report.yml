@@ -1,6 +1,8 @@
 name: Instant Report
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "0 0 1 1 *"  # Never runs (Jan 1st)
 jobs:
   send-instant-report:
     runs-on: ubuntu-latest
